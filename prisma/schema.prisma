@@ -7,6 +7,7 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ENUMS
 enum Role {
   SUPER_ADMIN
   ADMIN
@@ -25,7 +26,14 @@ enum License {
   STANDARD
   EXTENDED
 }
- 
+
+enum UploadStatus {
+  UPLOADED
+  ASSOCIATED
+  FAILED
+}
+
+// MODELS
 model User {
   id            String          @id @default(cuid())
   name          String?
@@ -34,14 +42,14 @@ model User {
   image         String?
   password      String?
   role          Role            @default(USER)
-  verificationToken String?
-  verificationTokenExpiry DateTime?
+  
   accounts      Account[]
   sessions      Session[]
   contributorItems ContributorItem[]
   downloads     Download[]
   savedItems    SavedItem[]
- 
+  initialUploads InitialUpload[] // Relation to initial uploads
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -85,18 +93,41 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
+// NEW MODEL FOR TECHNICAL UPLOADS
+model InitialUpload {
+  id                String       @id @default(cuid())
+  
+  originalFileName  String
+  fileSize          Int
+  mimeType          String
+
+  s3Key             String       @unique
+  previewS3Key      String       @unique
+  
+  status            UploadStatus @default(UPLOADED)
+
+  userId            String
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  contributorItemId String?      @unique
+  
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+
 model ContributorItem {
   id          String               @id @default(cuid())
   title       String
-  description String
+  description String?
   imageUrl    String
   previewUrl  String
   status      ContributorItemStatus @default(PENDING)
   license     License
   tags        String[]
-  category    String               @default("")
-  imageType   String               @default("JPG")
-  aiGeneratedStatus String         @default("NOT_AI_GENERATED")
+  category    String
+  imageType   String
+  aiGeneratedStatus String
   downloads   Int                  @default(0)
   views       Int                  @default(0)
   
