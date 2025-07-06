@@ -102,8 +102,12 @@ export function UploadForm() {
       const initialFiles = await getInitialUploadsWithSignedUrls();
       dispatch(setFiles(initialFiles));
       if (initialFiles.length > 0) {
+        // Reset selection logic to avoid out-of-bounds errors
         setActiveFileIndex(0);
         setSelectedFiles([0]);
+      } else {
+        setActiveFileIndex(null);
+        setSelectedFiles([]);
       }
     } catch (err: any) {
       toast.error("Failed to load your pending uploads.");
@@ -218,6 +222,9 @@ export function UploadForm() {
   const canSubmitForReview = files.some(isFileComplete);
   const canSaveAsDraft = files.some(file => file.title?.trim() && file.description?.trim());
 
+  // =================================================================
+  // ==  FIXED FUNCTION: This is the corrected `handleSubmitAll` function  ==
+  // =================================================================
   const handleSubmitAll = async (saveAsDraft: boolean = false) => {
     if (files.length === 0) {
       toast.error("There are no files to submit.");
@@ -229,7 +236,7 @@ export function UploadForm() {
       .map(({ previewUrl, originalFileName, ...rest }) => rest);
 
     if (filesToSubmit.length === 0) {
-      toast.error(saveAsDraft ? "Add a title and description to at least one image to save it as a draft." : "Complete required fields (title, category, description, tags) for at least one image.");
+      toast.error(saveAsDraft ? "Add a title and description to at least one image to save it as a draft." : "Complete required fields for at least one image.");
       return;
     }
 
@@ -241,19 +248,33 @@ export function UploadForm() {
 
       if (result.count > 0) {
         toast.success(`${result.count} file(s) were successfully ${saveAsDraft ? 'saved as drafts' : 'submitted'}.`, { id: "submit-toast" });
-        dispatch(setSuccess("Submission complete!"));
 
-        setTimeout(() => {
-          router.push(saveAsDraft ? '/contributor/drafts' : '/contributor/under-review');
-          dispatch(clearFiles());
-        }, 1500);
+        const allFilesWereSubmitted = filesToSubmit.length === files.length;
+
+        if (allFilesWereSubmitted) {
+          // If ALL files were submitted, show the success screen and navigate away.
+          dispatch(setSuccess("Submission complete!"));
+          setTimeout(() => {
+            router.push(saveAsDraft ? '/contributor/drafts' : '/contributor/under-review');
+            dispatch(clearFiles());
+          }, 1500);
+        } else {
+          // **THE FIX**: If only a subset of files was submitted, we
+          // re-fetch the pending uploads from the server. This will update
+          // the UI to show only the remaining, unsubmitted files.
+          await loadInitialFiles();
+        }
       } else {
+        // Handle cases where backend reports 0 files processed, possibly due to a state mismatch.
         toast.error("No files were submitted. They may have been processed already.", { id: "submit-toast" });
+        await loadInitialFiles(); // Refresh state to match the backend.
       }
     } catch (err: any) {
       toast.error(`Submission failed: ${err.message}`, { id: "submit-toast" });
       dispatch(setError(err.message));
     } finally {
+      // The `isUploading` state should be cleared unless a full-success navigation
+      // is happening, but clearing it is safe in all cases.
       dispatch(setUploading(false));
     }
   };
@@ -271,24 +292,6 @@ export function UploadForm() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
-
-  // FIX: This useEffect was removed as it was conflicting with user-driven state changes
-  // from event handlers like `toggleFileSelection`, causing an infinite render loop.
-  // The logic for managing active/selected files is now correctly and sufficiently
-  // handled within the event handlers themselves (e.g., loadInitialFiles, handleRemoveFile).
-  /*
-  useEffect(() => {
-    if (files.length > 0 && activeFileIndex === null && selectedFiles.length === 0) {
-      setActiveFileIndex(0);
-      setSelectedFiles([0]);
-    } else if (files.length === 0) {
-      setActiveFileIndex(null);
-      setSelectedFiles([]);
-    } else if (activeFileIndex !== null && activeFileIndex >= files.length) {
-      setActiveFileIndex(files.length - 1);
-    }
-  }, [files, activeFileIndex, selectedFiles]);
-  */
 
   const handleAddTag = (index: number) => {
     if (!newTag.trim()) return;

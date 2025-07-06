@@ -1,4 +1,4 @@
-// redux/features/uploadSlice.ts
+// @redux/features/uploadSlice.ts
 
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
@@ -45,6 +45,22 @@ export const uploadSlice = createSlice({
         state.files[index] = { ...state.files[index], ...data };
       }
     },
+    // --- START OF FIX ---
+    // New reducer to update multiple files at once.
+    updateMultipleFiles: (state, action: PayloadAction<{ indices: number[], data: Partial<UploadFile> }>) => {
+      const { indices, data } = action.payload;
+      indices.forEach(index => {
+        if (index >= 0 && index < state.files.length) {
+          // For tags, we need to merge instead of replace, unless a full new array is provided
+          if (data.tags && !Array.isArray(data.tags)) {
+            // This logic is better handled in the component, here we just update
+          } else {
+            state.files[index] = { ...state.files[index], ...data };
+          }
+        }
+      });
+    },
+    // --- END OF FIX ---
     // Removes a file from the list (e.g., after successful deletion from server)
     removeFileById: (state, action: PayloadAction<string>) => {
       state.files = state.files.filter((file) => file.id !== action.payload);
@@ -74,6 +90,7 @@ export const uploadSlice = createSlice({
 export const {
   setFiles,
   updateFile,
+  updateMultipleFiles, // Export the new action
   removeFileById,
   clearFiles,
   setUploading,

@@ -7,6 +7,7 @@ import {
   Sparkles,
   Trash2
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
@@ -20,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { updateFile } from "@/redux/features/uploadSlice";
+import { updateFile, updateMultipleFiles } from "@/redux/features/uploadSlice"; // Import the new action
 import { UploadFile } from "@/redux/features/uploadSlice";
 import {
   categoryOptions,
@@ -39,6 +40,7 @@ type UploadSidebarProps = {
   setActiveFileIndex: (index: number | null) => void;
   newTag: string;
   setNewTag: (tag: string) => void;
+  // handleAddTag and handleRemoveTag will be redefined inside
   handleAddTag: (index: number) => void;
   handleRemoveTag: (fileIndex: number, tagIndex: number) => void;
   handleRemoveFile: (index: number) => void;
@@ -51,7 +53,6 @@ type UploadSidebarProps = {
   transparentImages: { [key: string]: boolean | null };
   handleSubmitAll: (saveDraft: boolean) => void;
   isFileComplete: (file: UploadFile) => boolean;
-  // REMOVED unused props: canSubmitForReview, canSaveAsDraft
 };
 
 export function UploadSidebar({
@@ -60,8 +61,7 @@ export function UploadSidebar({
   setActiveFileIndex,
   newTag,
   setNewTag,
-  handleAddTag,
-  handleRemoveTag,
+  // handleAddTag and handleRemoveTag are passed but we will use our own bulk-aware versions
   handleRemoveFile,
   selectedFiles,
   isGenerating,
@@ -80,33 +80,84 @@ export function UploadSidebar({
   }
 
   const activeFile = files[activeFileIndex];
+  const isBulkEditing = selectedFiles.length > 1;
 
   // --- START OF FIX ---
-  // 1. Get the actual file objects that are currently selected for editing.
-  const filesBeingEdited = selectedFiles.map(index => files[index]);
 
-  // 2. Define a function to check if a file is "draftable" (less strict than "complete").
-  const isFileDraftable = (file: UploadFile) => {
-    return Boolean(file.title?.trim() && file.description?.trim());
+  // 1. Generic handler to update one or many files
+  const handleFieldChange = (data: Partial<UploadFile>) => {
+    if (isBulkEditing) {
+      dispatch(updateMultipleFiles({ indices: selectedFiles, data }));
+    } else {
+      dispatch(updateFile({ index: activeFileIndex, data }));
+    }
   };
 
-  // 3. Check if ALL selected files meet the criteria for drafting or submitting.
-  //    The `.every()` method ensures that every single file in the selection passes the test.
+  // 2. Function to get a shared value from all selected files
+  const getSharedValue = <K extends keyof UploadFile>(key: K): UploadFile[K] | undefined => {
+    const firstValue = files[selectedFiles[0]][key];
+    const allSame = selectedFiles.every(index => files[index][key] === firstValue);
+    return allSame ? firstValue : undefined;
+  };
+
+  // 3. Define shared values for form inputs. If values are different, they will be undefined.
+  const sharedValues = {
+    title: isBulkEditing ? getSharedValue('title') : activeFile.title,
+    description: isBulkEditing ? getSharedValue('description') : activeFile.description,
+    category: isBulkEditing ? getSharedValue('category') : activeFile.category,
+    license: isBulkEditing ? getSharedValue('license') : activeFile.license,
+    imageType: isBulkEditing ? getSharedValue('imageType') : activeFile.imageType,
+    aiGeneratedStatus: isBulkEditing ? getSharedValue('aiGeneratedStatus') : activeFile.aiGeneratedStatus,
+  };
+
+  // 4. Recalculate submit button states based on ALL selected files
+  const filesBeingEdited = selectedFiles.map(index => files[index]);
+  const isFileDraftable = (file: UploadFile) => Boolean(file.title?.trim());
   const canSaveSelectionAsDraft = filesBeingEdited.length > 0 && filesBeingEdited.every(isFileDraftable);
   const canSubmitSelectionForReview = filesBeingEdited.length > 0 && filesBeingEdited.every(isFileComplete);
+
+  // 5. Bulk-aware tag handling
+  const allSelectedTags = isBulkEditing
+    ? [...new Set(selectedFiles.flatMap(index => files[index].tags || []))]
+    : activeFile.tags;
+
+  const handleAddTags = () => {
+    if (!newTag.trim()) return;
+    const tagsToAdd = newTag.split(',').map(tag => tag.trim()).filter(Boolean);
+    if (tagsToAdd.length === 0) return;
+
+    const indicesToUpdate = isBulkEditing ? selectedFiles : [activeFileIndex];
+    indicesToUpdate.forEach(index => {
+      const file = files[index];
+      const currentTags = file.tags || [];
+      const combined = [...new Set([...currentTags, ...tagsToAdd])];
+      const finalTags = combined.slice(0, 50); // Enforce 50 tag limit
+      if (combined.length > 50) {
+        toast.warning(`Keyword limit reached for ${file.originalFileName}. Some tags were not added.`);
+      }
+      dispatch(updateFile({ index, data: { tags: finalTags } }));
+    });
+    setNewTag("");
+  };
+
+  const handleRemoveTagFromSelection = (tagToRemove: string) => {
+    const indicesToUpdate = isBulkEditing ? selectedFiles : [activeFileIndex];
+    indicesToUpdate.forEach(index => {
+      const file = files[index];
+      const newTags = (file.tags || []).filter(t => t !== tagToRemove);
+      dispatch(updateFile({ index, data: { tags: newTags } }));
+    });
+  };
+
   // --- END OF FIX ---
 
   return (
     <div className="absolute top-0 right-0 bottom-0 w-[400px] bg-gray-950 border-l border-gray-800/50 overflow-hidden z-50 flex flex-col h-screen shadow-xl max-h-full">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
-        <div className="flex items-center gap-2">
-          <h3 className="text-lg font-medium text-white">
-            {selectedFiles.length > 1
-              ? `Edit ${selectedFiles.length} Images`
-              : "Edit Image Details"}
-          </h3>
-        </div>
+        <h3 className="text-lg font-medium text-white">
+          {isBulkEditing ? `Edit ${selectedFiles.length} Images` : "Edit Image Details"}
+        </h3>
         <button
           type="button"
           onClick={() => {
@@ -174,40 +225,27 @@ export function UploadSidebar({
 
         {/* Form fields - scrollable */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-          {/* ... (rest of the form fields remain the same) ... */}
           <div>
             <Label htmlFor="sidebar-title" className="text-gray-300 flex items-center">
               Title <span className="text-red-400 ml-1">*</span>
             </Label>
             <Input
               id="sidebar-title"
-              value={activeFile.title}
-              onChange={(e) => {
-                dispatch(updateFile({
-                  index: activeFileIndex,
-                  data: { title: e.target.value }
-                }));
-              }}
-              placeholder="Enter image title"
+              value={sharedValues.title ?? ''}
+              onChange={(e) => handleFieldChange({ title: e.target.value })}
+              placeholder={isBulkEditing && sharedValues.title === undefined ? 'Multiple values' : 'Enter image title'}
               required
               className="mt-1 bg-gray-800 border-gray-700 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
 
           <div>
-            <Label htmlFor="sidebar-description" className="text-gray-300">
-              Description
-            </Label>
+            <Label htmlFor="sidebar-description" className="text-gray-300">Description</Label>
             <Textarea
               id="sidebar-description"
-              value={activeFile.description}
-              onChange={(e) => {
-                dispatch(updateFile({
-                  index: activeFileIndex,
-                  data: { description: e.target.value }
-                }));
-              }}
-              placeholder="Describe your image"
+              value={sharedValues.description ?? ''}
+              onChange={(e) => handleFieldChange({ description: e.target.value })}
+              placeholder={isBulkEditing && sharedValues.description === undefined ? 'Multiple values' : 'Describe your image'}
               rows={2}
               className="mt-1 bg-gray-800 border-gray-700 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500"
             />
@@ -215,61 +253,30 @@ export function UploadSidebar({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="sidebar-category" className="text-gray-300 flex items-center">
-                Category <span className="text-red-400 ml-1">*</span>
-              </Label>
+              <Label htmlFor="sidebar-category">Category <span className="text-red-400 ml-1">*</span></Label>
               <Select
-                value={activeFile.category}
-                onValueChange={(value) => {
-                  dispatch(updateFile({
-                    index: activeFileIndex,
-                    data: { category: value }
-                  }));
-                }}
+                value={sharedValues.category ?? ''}
+                onValueChange={(value) => handleFieldChange({ category: value })}
               >
                 <SelectTrigger id="sidebar-category" className="mt-1 bg-gray-800 border-gray-700 text-gray-200">
-                  <SelectValue placeholder="Select category" />
+                  <SelectValue placeholder={isBulkEditing && sharedValues.category === undefined ? 'Multiple values' : 'Select category'} />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
-                  {CATEGORY_OPTIONS.map((category) => (
-                    <SelectItem
-                      key={category.value}
-                      value={category.value}
-                      className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700"
-                    >
-                      {category.label}
-                    </SelectItem>
-                  ))}
+                  {CATEGORY_OPTIONS.map((cat) => <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-
             <div>
-              <Label htmlFor="sidebar-license" className="text-gray-300 flex items-center">
-                License
-              </Label>
+              <Label htmlFor="sidebar-license">License</Label>
               <Select
-                value={activeFile.license}
-                onValueChange={(value) => {
-                  dispatch(updateFile({
-                    index: activeFileIndex,
-                    data: { license: value }
-                  }));
-                }}
+                value={sharedValues.license ?? ''}
+                onValueChange={(value) => handleFieldChange({ license: value })}
               >
                 <SelectTrigger id="sidebar-license" className="mt-1 bg-gray-800 border-gray-700 text-gray-200">
-                  <SelectValue placeholder="Select license" />
+                  <SelectValue placeholder={isBulkEditing && sharedValues.license === undefined ? 'Multiple values' : 'Select license'} />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
-                  {LICENSE_OPTIONS.map((license) => (
-                    <SelectItem
-                      key={license.value}
-                      value={license.value}
-                      className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700"
-                    >
-                      {license.label}
-                    </SelectItem>
-                  ))}
+                  {LICENSE_OPTIONS.map((lic) => <SelectItem key={lic.value} value={lic.value}>{lic.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -277,75 +284,42 @@ export function UploadSidebar({
 
           <div className="grid grid-cols-2 gap-4 items-center">
             <div>
-              <Label htmlFor="sidebar-image-type" className="text-gray-300 flex items-center">
-                Image Type <span className="text-red-400 ml-1">*</span>
-              </Label>
+              <Label htmlFor="sidebar-image-type">Image Type <span className="text-red-400 ml-1">*</span></Label>
               <Select
-                value={activeFile.imageType}
-                onValueChange={(value) => {
-                  dispatch(updateFile({
-                    index: activeFileIndex,
-                    data: { imageType: value }
-                  }));
-                }}
+                value={sharedValues.imageType ?? ''}
+                onValueChange={(value) => handleFieldChange({ imageType: value })}
               >
                 <SelectTrigger id="sidebar-image-type" className="mt-1 bg-gray-800 border-gray-700 text-gray-200">
-                  <SelectValue placeholder="Select image type" />
+                  <SelectValue placeholder={isBulkEditing && sharedValues.imageType === undefined ? 'Multiple values' : 'Select type'} />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
-                  {IMAGE_TYPE_OPTIONS.map((type) => (
-                    <SelectItem
-                      key={type.value}
-                      value={type.value}
-                      className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700"
-                    >
-                      {type.label}
-                    </SelectItem>
-                  ))}
+                  {IMAGE_TYPE_OPTIONS.map((type) => <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
 
             <div>
-              <Label htmlFor="sidebar-ai-status" className="text-gray-300 flex items-center mb-2">
-                AI Generated <span className="text-red-400 ml-1">*</span>
-              </Label>
+              <Label htmlFor="sidebar-ai-status" className="mb-2">AI Generated <span className="text-red-400 ml-1">*</span></Label>
               <div className="flex items-center gap-2">
                 <Switch
                   id="sidebar-ai-status"
-                  checked={activeFile.aiGeneratedStatus === "AI_GENERATED"}
-                  onCheckedChange={(checked: boolean) => {
-                    const newStatus = checked ? "AI_GENERATED" : "NOT_AI_GENERATED";
-                    dispatch(updateFile({
-                      index: activeFileIndex,
-                      data: { aiGeneratedStatus: newStatus }
-                    }));
-                  }}
+                  checked={sharedValues.aiGeneratedStatus === "AI_GENERATED"}
+                  onCheckedChange={(checked) => handleFieldChange({ aiGeneratedStatus: checked ? "AI_GENERATED" : "NOT_AI_GENERATED" })}
                 />
                 <span className="text-sm text-gray-400">
-                  {activeFile.aiGeneratedStatus === "AI_GENERATED" ? "Yes" : "No"}
+                  {sharedValues.aiGeneratedStatus === "AI_GENERATED" ? "Yes" : sharedValues.aiGeneratedStatus === "NOT_AI_GENERATED" ? "No" : "Mixed"}
                 </span>
               </div>
             </div>
           </div>
 
           <div>
-            <Label className="text-gray-300 flex justify-between items-center">
-              <span>Keywords <span className="text-red-400 ml-1">*</span></span>
-              <span className="text-xs text-gray-500">{activeFile.tags.length}/50 max</span>
-            </Label>
+            <Label>Keywords <span className="text-red-400 ml-1">*</span></Label>
             <div className="flex flex-wrap gap-2 mt-2 min-h-[40px] p-2 border rounded-md border-gray-700 bg-gray-900">
-              {activeFile.tags.map((tag: string, tagIndex: number) => (
-                <Badge
-                  key={tagIndex}
-                  className="gap-1 bg-indigo-900/60 text-indigo-300 hover:bg-indigo-800/60 border border-indigo-800"
-                >
+              {allSelectedTags.map((tag: string, tagIndex: number) => (
+                <Badge key={`${tag}-${tagIndex}`} className="gap-1 bg-indigo-900/60 text-indigo-300">
                   {tag}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveTag(activeFileIndex, tagIndex)}
-                    className="ml-1 text-indigo-300 hover:text-indigo-100"
-                  >
+                  <button type="button" onClick={() => handleRemoveTagFromSelection(tag)} className="ml-1 text-indigo-300 hover:text-indigo-100">
                     <X className="h-3 w-3" />
                   </button>
                 </Badge>
@@ -359,22 +333,15 @@ export function UploadSidebar({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    handleAddTag(activeFileIndex);
+                    handleAddTags();
                   }
                 }}
-                className="bg-gray-800 border-gray-700 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500 h-10"
+                className="bg-gray-800 border-gray-700 text-gray-200"
               />
-              <Button
-                type="button"
-                onClick={() => handleAddTag(activeFileIndex)}
-                className="bg-gray-800 text-gray-200 border-gray-700 hover:bg-gray-700 hover:text-white h-10 px-4 flex items-center justify-center"
-              >
+              <Button type="button" onClick={handleAddTags} className="bg-gray-800 text-gray-200 border-gray-700 hover:bg-gray-700">
                 <Plus className="h-4 w-4 mr-2" /> Add
               </Button>
             </div>
-            <p className="text-xs text-gray-400 mt-1">
-              Press Enter or click Add. Separate multiple keywords with a comma.
-            </p>
           </div>
         </div>
 
@@ -384,12 +351,8 @@ export function UploadSidebar({
             type="button"
             onClick={() => handleSubmitAll(true)}
             disabled={isUploading || !canSaveSelectionAsDraft}
-            title={
-              !canSaveSelectionAsDraft
-                ? "All selected images must have a title and description to be saved as a draft."
-                : "Save selected images as drafts"
-            }
-            className="flex-1 border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white disabled:bg-gray-800/50 disabled:cursor-not-allowed"
+            title={!canSaveSelectionAsDraft ? "All selected images must have a title to be saved." : "Save selected images as drafts"}
+            className="flex-1 border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300"
           >
             Save as Draft
           </Button>
@@ -397,14 +360,10 @@ export function UploadSidebar({
             type="button"
             onClick={() => handleSubmitAll(false)}
             disabled={isUploading || !canSubmitSelectionForReview}
-            title={
-              !canSubmitSelectionForReview
-                ? "All selected images must have all required fields completed to be submitted."
-                : "Submit selected images for review"
-            }
-            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-indigo-800/50 disabled:cursor-not-allowed"
+            title={!canSubmitSelectionForReview ? "All selected images must have all required fields completed." : "Submit selected images for review"}
+            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white"
           >
-            {isUploading ? "Submitting..." : "Submit for Review"}
+            {isUploading ? "Submitting..." : `Submit ${selectedFiles.length} item(s)`}
           </Button>
         </div>
       </div>
