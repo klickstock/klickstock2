@@ -2,9 +2,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/prisma";
-import { 
+import {
   ArrowLeft,
-  Calendar, 
+  Calendar,
   Tag,
   Download,
   Eye,
@@ -22,7 +22,7 @@ import { ImageWithPattern } from "@/components/ui/image-with-pattern";
 // Server action to increment view count
 async function incrementViewCount(id: string) {
   'use server';
-  
+
   await db.contributorItem.update({
     where: { id },
     data: {
@@ -35,13 +35,13 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
   // Await params before destructuring
   const resolvedParams = await params;
   const { id } = resolvedParams;
-  
+
   // Increment view count
   await incrementViewCount(id);
-  
+
   // Fetch the image details
   const image = await db.contributorItem.findUnique({
-    where: { 
+    where: {
       id,
       status: "APPROVED" // Only show approved images
     },
@@ -56,12 +56,12 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
       }
     }
   });
-  
+
   // If image not found or not approved, return 404
   if (!image) {
     notFound();
   }
-  
+
   // Fetch related images by the same user
   const relatedImages = await db.contributorItem.findMany({
     where: {
@@ -72,7 +72,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
     orderBy: { createdAt: 'desc' },
     take: 6
   });
-  
+
   // Also fetch similar images by category or tags - increased limit
   const similarImages = await db.contributorItem.findMany({
     where: {
@@ -99,7 +99,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
   // Format image type for display
   const imageType = image.imageType || 'JPG';
   const isAiGenerated = image.aiGeneratedStatus === 'AI_GENERATED';
-  
+
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Content starts directly without separate navigation area */}
@@ -107,8 +107,8 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
         {/* Title, description, and back button in one container */}
         <div className="flex flex-col space-y-2 mb-6">
           <div className="flex items-center gap-3 mb-1">
-            <Link 
-              href="/gallery" 
+            <Link
+              href="/gallery"
               className="bg-gray-800/80 hover:bg-gray-700 text-gray-200 hover:text-white transition-all 
                          text-sm font-medium py-2 px-4 rounded-full flex items-center 
                          shadow-md hover:shadow-lg"
@@ -122,7 +122,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
             {image.description || 'No description provided'}
           </p>
         </div>
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Image Column */}
           <div className="lg:col-span-2 space-y-8">
@@ -134,17 +134,17 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                   <Download className="w-3.5 h-3.5 mr-1.5" />
                   <span>{image.downloads || 0} downloads</span>
                 </div>
-                
+
                 {/* AI Badge if applicable */}
                 {isAiGenerated && (
                   <div className="absolute top-4 left-4 z-10 bg-purple-600/80 text-white text-xs py-1 px-3 rounded-full">
                     AI Generated
                   </div>
                 )}
-                
+
                 {/* Main Image */}
                 <div className="aspect-[4/3] flex items-center justify-center relative">
-                  <ImageWithPattern 
+                  <ImageWithPattern
                     src={image.previewUrl || image.imageUrl}
                     alt={image.title}
                     fill
@@ -157,14 +157,14 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                 </div>
               </div>
             </div>
-            
+
             {/* Similar Content */}
             {similarImages.length > 0 && (
               <div className="mt-8">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-white">Similar content</h2>
-                  <Link 
-                    href={`/gallery?category=${image.category}`} 
+                  <Link
+                    href={`/gallery?category=${image.category}`}
                     className="text-indigo-400 hover:text-indigo-300 text-sm font-medium flex items-center"
                   >
                     View more <ChevronRight className="w-4 h-4 ml-1" />
@@ -172,12 +172,12 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-auto">
                   {similarImages.map((item) => (
-                    <Link 
-                      key={item.id} 
+                    <Link
+                      key={item.id}
                       href={`/gallery/${item.id}`}
                       className="group block relative hover:opacity-95 transition-all duration-300"
                     >
-                      <Image 
+                      <Image
                         src={item.imageUrl}
                         alt={item.title}
                         width={400}
@@ -190,7 +190,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
               </div>
             )}
           </div>
-          
+
           {/* Sidebar - Combined sections into one unified div */}
           <div>
             {/* Single Unified Card with all image information */}
@@ -201,7 +201,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                 <Link href={`/creator/${image.userId}`} className="flex items-center space-x-3 mb-6 group">
                   <div className="h-12 w-12 rounded-full bg-gray-800 overflow-hidden relative flex-shrink-0">
                     {image.user.image ? (
-                      <Image 
+                      <Image
                         src={image.user.image}
                         alt={image.user.name || "Creator"}
                         fill
@@ -220,9 +220,9 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     <p className="text-sm text-gray-400">View profile</p>
                   </div>
                 </Link>
-                
+
                 {/* Image Actions using the updated component */}
-                <ImageDetailActions 
+                <ImageDetailActions
                   imageId={image.id}
                   imageUrl={image.imageUrl}
                   title={image.title}
@@ -230,7 +230,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                   currentViews={image.views || 0}
                 />
               </div>
-              
+
               {/* Image details section */}
               <div className="border-t border-gray-800/50 px-6 py-5 bg-gray-900/60 space-y-4">
                 <div className="flex">
@@ -240,7 +240,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     {image.license || 'Standard License'}
                   </div>
                 </div>
-                
+
                 <div className="flex">
                   <div className="w-1/3 text-sm text-gray-400">File type</div>
                   <div className="w-2/3 text-sm text-gray-300 flex items-center">
@@ -248,11 +248,11 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     {imageType}
                   </div>
                 </div>
-                
+
                 <div className="flex">
                   <div className="w-1/3 text-sm text-gray-400">Category</div>
                   <div className="w-2/3 text-sm text-gray-300">
-                    <Link 
+                    <Link
                       href={`/gallery?category=${image.category}`}
                       className="flex items-center hover:text-indigo-400 transition-colors"
                     >
@@ -261,7 +261,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     </Link>
                   </div>
                 </div>
-                
+
                 {/* Tags section - now integrated into the same card */}
                 {image.tags && image.tags.length > 0 && (
                   <>
@@ -269,8 +269,8 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                       <h3 className="text-base font-medium text-white mb-3">Tags</h3>
                       <div className="flex flex-wrap gap-2">
                         {image.tags.map((tag, index) => (
-                          <Link 
-                            key={index} 
+                          <Link
+                            key={index}
                             href={`/gallery?q=${tag}`}
                             className="inline-flex items-center px-3 py-2 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs transition-colors"
                           >
@@ -282,14 +282,14 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     </div>
                   </>
                 )}
-                
+
                 {/* Legal Info - now integrated */}
                 <div className="border-t border-gray-800/30 pt-4 mt-4 text-xs text-gray-400">
                   <p className="mb-2">
                     This resource can be used for personal and commercial projects with attribution.
                   </p>
                   <p>
-                    &copy; {new Date().getFullYear()} {image.user.name || 'Creator'} / KlickStock 
+                    &copy; {new Date().getFullYear()} {image.user.name || 'Creator'} / KlickStock
                   </p>
                 </div>
               </div>
@@ -300,8 +300,8 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
               <div className="mt-12">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-white">More from this creator</h2>
-                  <Link 
-                    href={`/creator/${image.userId}`} 
+                  <Link
+                    href={`/creator/${image.userId}`}
                     className="text-indigo-400 hover:text-indigo-300 text-sm font-medium flex items-center"
                   >
                     View all <ChevronRight className="w-4 h-4 ml-1" />
@@ -309,12 +309,12 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 auto-rows-auto">
                   {relatedImages.map((item) => (
-                    <Link 
-                      key={item.id} 
+                    <Link
+                      key={item.id}
                       href={`/gallery/${item.id}`}
                       className="group block relative hover:opacity-95 transition-all"
                     >
-                      <Image 
+                      <Image
                         src={item.imageUrl}
                         alt={item.title}
                         width={300}

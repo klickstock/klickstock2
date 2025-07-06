@@ -217,9 +217,13 @@
 
 import sharp from 'sharp';
 
-const PREVIEW_MAX_WIDTH = 800;
+// --- MODIFIED: Increased resolution ---
+const PREVIEW_MAX_WIDTH = 1600; // Increased from 800 for higher resolution previews
 const WATERMARK_TEXT = 'KlickStock';
-const TILE_SIZE = 300; // Size of the watermark tile
+
+// --- MODIFIED: Scaled up watermark for better visibility on larger images ---
+const TILE_SIZE = 400; // Increased from 300
+const WATERMARK_FONT_SIZE = 32; // Increased from 24
 
 // Cache for the watermark tile buffer
 let watermarkTileBuffer: Buffer | null = null;
@@ -241,7 +245,7 @@ async function getWatermarkTileBuffer(): Promise<Buffer> {
       <text
         x="50%"
         y="50%"
-        font-size="24"
+        font-size="${WATERMARK_FONT_SIZE}"
         fill="rgba(255, 255, 255, 0.25)"
         text-anchor="middle"
         dominant-baseline="middle"
@@ -264,7 +268,7 @@ async function getWatermarkTileBuffer(): Promise<Buffer> {
  */
 export async function generatePreviewWithWatermark(imageBuffer: Buffer): Promise<Buffer> {
   try {
-    // Step 1: Resize the image and get its buffer
+    // Step 1: Resize the image to the new, higher resolution
     const resizedImage = await sharp(imageBuffer, {
       failOnError: false,
     })
@@ -293,6 +297,7 @@ export async function generatePreviewWithWatermark(imageBuffer: Buffer): Promise
       tile = true;
     } else {
       // Generate a single SVG overlay for smaller images
+      // This logic remains robust as it's relative to the image size
       const fontSize = Math.min(width, height) / 10;
       const svg = `
         <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -319,11 +324,12 @@ export async function generatePreviewWithWatermark(imageBuffer: Buffer): Promise
     const finalBuffer = await sharp(resizedImage)
       .composite([{
         input: watermarkBuffer,
-        tile, // Tile if large, single overlay if small
+        tile,
         blend: 'over',
       }])
       .jpeg({
-        quality: 85,
+        // --- MODIFIED: Increased quality for better results at higher resolution ---
+        quality: 90, // Increased from 85
         mozjpeg: true,
         force: true,
       })

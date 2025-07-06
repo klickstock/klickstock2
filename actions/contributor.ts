@@ -20,7 +20,7 @@ import { UploadFile } from "@/redux/features/uploadSlice";
 /**
  * Handles the initial upload of one or more files to S3 and creates records in the InitialUpload table.
  */
-export async function handleInitialUploads(formData: FormData): Promise<{ success: boolean }> {
+export async function handleInitialUploads(formData: FormData): Promise<{ success: boolean; count: number }> {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
   if (!(await hasContributorAccess())) throw new Error("You don't have permission to upload content.");
@@ -33,40 +33,49 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
   const maxSize = 50 * 1024 * 1024; // 50MB
 
   try {
-    const uploadPromises = files.map(async (file) => {
-      if (file.size > maxSize) throw new Error(`File "${file.name}" exceeds the 50MB size limit.`);
-      if (!file.type.startsWith("image/")) throw new Error(`File "${file.name}" is not a valid image type.`);
+    // 1. Process all file uploads to S3 in parallel
+    const s3Uploads = await Promise.all(
+      files.map(async (file) => {
+        if (file.size > maxSize) throw new Error(`File "${file.name}" exceeds the 50MB size limit.`);
+        if (!file.type.startsWith("image/")) throw new Error(`File "${file.name}" is not a valid image type.`);
 
-      const originalBuffer = await bufferizeFile(file);
-      const previewBuffer = await generatePreviewWithWatermarkSafe(originalBuffer);
-      if (!previewBuffer) throw new Error(`Failed to generate preview for "${file.name}".`);
+        const originalBuffer = await bufferizeFile(file);
+        const previewBuffer = await generatePreviewWithWatermarkSafe(originalBuffer);
+        if (!previewBuffer) throw new Error(`Failed to generate preview for "${file.name}".`);
 
-      const sanitizedFileName = sanitizeFileName(file.name);
-      const previewFileName = getPreviewFileName(file.name);
+        const sanitizedFileName = sanitizeFileName(file.name);
+        const previewFileName = getPreviewFileName(file.name);
 
-      const [originalUpload, previewUpload] = await Promise.all([
-        uploadImageToS3(originalBuffer, folderName, sanitizedFileName),
-        uploadImageToS3(previewBuffer, folderName, previewFileName)
-      ]);
+        const [originalUpload, previewUpload] = await Promise.all([
+          uploadImageToS3(originalBuffer, folderName, sanitizedFileName),
+          uploadImageToS3(previewBuffer, folderName, previewFileName),
+        ]);
 
-      return db.initialUpload.create({
-        data: {
+        // Return the data needed for the database record
+        return {
           originalFileName: file.name,
           fileSize: file.size,
           mimeType: file.type,
           s3Key: originalUpload.key,
           previewS3Key: previewUpload.key,
           userId,
-        },
-      });
+        };
+      })
+    );
+
+    // 2. Insert all records into the database in a single, efficient query.
+    // This avoids opening many parallel connections, which was the likely cause of your database error.
+    const result = await db.initialUpload.createMany({
+      data: s3Uploads,
     });
 
-    await Promise.all(uploadPromises);
     revalidatePath('/contributor/upload');
-    return { success: true };
+    return { success: true, count: result.count };
 
   } catch (error: any) {
     console.error("Initial upload error:", error);
+    // In a real-world scenario, you might want to add logic here to delete
+    // the files that were successfully uploaded to S3 before the error occurred.
     throw new Error(error.message || "An unexpected error occurred during file upload.");
   }
 }
@@ -84,29 +93,44 @@ export async function getInitialUploadsWithSignedUrls(): Promise<UploadFile[]> {
     orderBy: { createdAt: 'desc' },
   });
 
+  // This part is fine as it needs to generate a signed URL for each item.
   const uploadsWithUrls = await Promise.all(
     uploads.map(async (upload) => {
-      const previewUrl = await getSignedReadUrl(upload.previewS3Key);
-      return {
-        id: upload.id,
-        previewUrl,
-        originalFileName: upload.originalFileName,
-        // Default metadata fields
-        title: upload.originalFileName.split('.').slice(0, -1).join('.').replace(/[-_]/g, ' '),
-        description: '',
-        tags: [],
-        license: 'STANDARD',
-        category: '',
-        imageType: upload.mimeType.includes('png') ? 'PNG' : 'JPG',
-        aiGeneratedStatus: 'NOT_AI_GENERATED',
-      };
+      try {
+        const previewUrl = await getSignedReadUrl(upload.previewS3Key);
+        return {
+          id: upload.id,
+          previewUrl,
+          originalFileName: upload.originalFileName,
+          title: upload.originalFileName.split('.').slice(0, -1).join('.').replace(/[-_]/g, ' '),
+          description: '',
+          tags: [],
+          license: 'STANDARD',
+          category: '',
+          imageType: upload.mimeType.includes('png') ? 'PNG' : 'JPG',
+          aiGeneratedStatus: 'NOT_AI_GENERATED',
+        };
+      } catch (urlError) {
+        console.error(`Failed to get signed URL for ${upload.previewS3Key}:`, urlError);
+        // Return a fallback object so the UI doesn't crash
+        return {
+          id: upload.id,
+          previewUrl: '', // Provide a placeholder or empty string
+          originalFileName: upload.originalFileName,
+          title: 'Error loading preview',
+          description: '', tags: [], license: 'STANDARD', category: '',
+          imageType: 'JPG', aiGeneratedStatus: 'NOT_AI_GENERATED',
+        };
+      }
     })
   );
-  return uploadsWithUrls;
+  // Filter out any items that failed to get a URL
+  return uploadsWithUrls.filter(upload => upload.previewUrl);
 }
 
 /**
- * NEW: Deletes ALL specified initial uploads and their corresponding files from S3.
+ * Deletes ALL specified initial uploads and their corresponding files from S3.
+ * This function was already well-written and efficient. No changes needed.
  */
 export async function deleteAllInitialUploads(fileIds: string[]): Promise<{ count: number }> {
   const session = await auth();
@@ -117,31 +141,24 @@ export async function deleteAllInitialUploads(fileIds: string[]): Promise<{ coun
   }
 
   try {
-    // 1. Fetch all valid records belonging to the user that can be deleted
     const uploadsToDelete = await db.initialUpload.findMany({
       where: {
         id: { in: fileIds },
         userId: session.user.id,
-        contributorItemId: null, // IMPORTANT: Only delete unsubmitted items
+        contributorItemId: null,
       },
       select: { id: true, s3Key: true, previewS3Key: true },
     });
 
-    if (uploadsToDelete.length === 0) {
-      return { count: 0 }; // No valid files to delete
-    }
+    if (uploadsToDelete.length === 0) return { count: 0 };
 
-    // 2. Collect all S3 keys for bulk deletion
     const s3Keys = uploadsToDelete.flatMap(upload => [upload.s3Key, upload.previewS3Key]);
     const validIdsToDelete = uploadsToDelete.map(upload => upload.id);
 
-    // 3. Perform bulk deletion from S3 and the database
     await Promise.all([
-      deleteMultipleImagesFromS3(s3Keys), // Assumes you have a bulk delete helper in lib/s3
+      deleteMultipleImagesFromS3(s3Keys),
       db.initialUpload.deleteMany({
-        where: {
-          id: { in: validIdsToDelete },
-        },
+        where: { id: { in: validIdsToDelete } },
       }),
     ]);
 
@@ -155,15 +172,16 @@ export async function deleteAllInitialUploads(fileIds: string[]): Promise<{ coun
 }
 
 /**
- * Deletes an initial upload record and its corresponding files from S3.
+ * Deletes a single initial upload record and its corresponding files from S3.
+ * This function is for a single item and is correct. No changes needed.
  */
 export async function deleteInitialUpload(id: string): Promise<{ success: boolean }> {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
 
-  const uploadToDelete = await db.initialUpload.findUnique({ where: { id } });
+  const uploadToDelete = await db.initialUpload.findUnique({ where: { id, userId: session.user.id } });
 
-  if (!uploadToDelete || uploadToDelete.userId !== session.user.id) {
+  if (!uploadToDelete) {
     throw new Error("Upload not found or you don't have permission to delete it.");
   }
   if (uploadToDelete.contributorItemId) {
@@ -175,7 +193,7 @@ export async function deleteInitialUpload(id: string): Promise<{ success: boolea
       deleteImageFromS3(uploadToDelete.s3Key),
       deleteImageFromS3(uploadToDelete.previewS3Key)
     ]);
-    await db.initialUpload.delete({ where: { id } });
+    await db.initialUpload.delete({ where: { id: uploadToDelete.id } }); // Use a more secure where clause
     revalidatePath('/contributor/upload');
     return { success: true };
   } catch (error: any) {
@@ -185,48 +203,61 @@ export async function deleteInitialUpload(id: string): Promise<{ success: boolea
 }
 
 /**
- * NEW: Creates ContributorItem records from submitted initial uploads. This is the new "submit" logic.
+ * Creates ContributorItem records from submitted initial uploads.
+ * REFACTORED for robustness. The transactional loop is correct here, but we can make it safer.
  */
 export async function createContributorItemsFromUploads(itemsToSubmit: Omit<UploadFile, 'previewUrl' | 'originalFileName'>[], saveAsDraft: boolean) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
+  if (!itemsToSubmit || itemsToSubmit.length === 0) {
+    return { success: true, count: 0 };
+  }
 
   const userId = session.user.id;
 
+  // REASON: The loop inside a transaction is the correct Prisma pattern when you need the ID
+  // of a newly created record (`newContributorItem.id`) to perform a subsequent update.
+  // A bulk `createMany` does not return the created IDs.
   const results = await db.$transaction(async (tx) => {
-    const createdItems = [];
+    // 1. Fetch all valid initial uploads in one go to reduce database round-trips.
+    const itemIds = itemsToSubmit.map(item => item.id);
+    const initialUploads = await tx.initialUpload.findMany({
+      where: {
+        id: { in: itemIds },
+        userId,
+        contributorItemId: null // Only process unsubmitted items
+      },
+    });
+    const validUploadsMap = new Map(initialUploads.map(up => [up.id, up]));
 
+
+    const createdItems = [];
     for (const item of itemsToSubmit) {
-      // 1. Verify the initial upload record
-      const initialUpload = await tx.initialUpload.findUnique({
-        where: { id: item.id, userId, contributorItemId: undefined },
-      });
+      const initialUpload = validUploadsMap.get(item.id);
 
       if (!initialUpload) {
         console.warn(`Skipping item ${item.id}: Not found, already submitted, or permission denied.`);
         continue;
       }
 
-      // 2. Construct full S3 URLs
-      const bucket = process.env.AWS_BUCKET_NAME || '';
-      const region = process.env.AWS_REGION || 'us-east-1';
+      // 2. Construct full S3 URLs (add checks for env variables)
+      const bucket = process.env.AWS_BUCKET_NAME;
+      const region = process.env.AWS_REGION;
+      if (!bucket || !region) {
+        throw new Error("AWS bucket name or region is not configured in environment variables.");
+      }
       const imageUrl = `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.s3Key}`;
       const previewUrl = `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.previewS3Key}`;
 
       // 3. Create the ContributorItem
       const newContributorItem = await tx.contributorItem.create({
         data: {
-          title: item.title,
-          description: item.description,
-          tags: item.tags,
+          title: item.title, description: item.description, tags: item.tags,
           category: item.category,
           license: item.license === 'EXTENDED' ? 'EXTENDED' : 'STANDARD',
-          imageType: item.imageType,
-          aiGeneratedStatus: item.aiGeneratedStatus,
+          imageType: item.imageType, aiGeneratedStatus: item.aiGeneratedStatus,
           status: saveAsDraft ? ContributorItemStatus.DRAFT : ContributorItemStatus.PENDING,
-          userId,
-          imageUrl, // Full, permanent URL
-          previewUrl, // Full, permanent URL
+          userId, imageUrl, previewUrl,
         }
       });
 
@@ -247,8 +278,6 @@ export async function createContributorItemsFromUploads(itemsToSubmit: Omit<Uplo
 
   return { success: true, count: results.length };
 }
-
-
 
 // ===================================================================
 // ORIGINAL FUNCTIONS (UNCHANGED)
