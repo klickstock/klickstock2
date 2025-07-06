@@ -8,7 +8,7 @@ export default function SiteLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col">
+    <div className="min-h-screen bg-gray-950 flex flex-col" suppressHydrationWarning>
       <Navbar />
       <main className="flex-grow">
         {children}
