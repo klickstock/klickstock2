@@ -44,8 +44,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Maximum file size (50MB)
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
+// =================================================================
+// ==  MODIFIED: New file size constants as per your request     ==
+// =================================================================
+// Maximum single file size (45MB)
+const MAX_SINGLE_FILE_SIZE = 45 * 1024 * 1024;
+// Maximum total size for a single batch upload (260MB)
+const MAX_TOTAL_FILE_SIZE = 260 * 1024 * 1024;
+
 const CATEGORY_OPTIONS = categoryOptions;
 
 // Helper to check for image transparency using a signed URL
@@ -124,8 +131,18 @@ export function UploadForm() {
     };
   }, [loadInitialFiles, dispatch]);
 
+  // =================================================================
+  // ==  MODIFIED: `onDrop` now checks for collective file size    ==
+  // =================================================================
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
+
+    // Check for total file size of the batch
+    const totalSize = acceptedFiles.reduce((acc, file) => acc + file.size, 0);
+    if (totalSize > MAX_TOTAL_FILE_SIZE) {
+      toast.error(`Total file size exceeds the limit. Please upload less than ${MAX_TOTAL_FILE_SIZE / 1024 / 1024}MB at a time.`);
+      return; // Stop the upload process
+    }
 
     dispatch(setUploading(true));
     toast.loading("Uploading your files...", { id: "upload-toast" });
@@ -147,16 +164,20 @@ export function UploadForm() {
     }
   }, [dispatch, loadInitialFiles]);
 
+  // =================================================================
+  // ==  MODIFIED: `useDropzone` now uses the new single file size ==
+  // =================================================================
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     accept: { 'image/*': ['.jpeg', '.jpg', '.png', '.gif'] },
-    maxSize: MAX_FILE_SIZE,
+    maxSize: MAX_SINGLE_FILE_SIZE, // Use the 45MB limit for single files
     disabled: isUploading || initialLoading,
     onDropRejected: (fileRejections) => {
       fileRejections.forEach(rejection => {
         rejection.errors.forEach(err => {
           if (err.code === 'file-too-large') {
-            toast.error(`File is too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB.`);
+            // Updated error message for single file size
+            toast.error(`File is too large. Maximum size is ${MAX_SINGLE_FILE_SIZE / 1024 / 1024}MB.`);
           } else {
             toast.error(err.message);
           }
@@ -164,6 +185,7 @@ export function UploadForm() {
       });
     }
   });
+
 
   const handleRemoveFile = async (index: number) => {
     const fileToRemove = files[index];
@@ -222,9 +244,6 @@ export function UploadForm() {
   const canSubmitForReview = files.some(isFileComplete);
   const canSaveAsDraft = files.some(file => file.title?.trim() && file.description?.trim());
 
-  // =================================================================
-  // ==  FIXED FUNCTION: This is the corrected `handleSubmitAll` function  ==
-  // =================================================================
   const handleSubmitAll = async (saveAsDraft: boolean = false) => {
     if (files.length === 0) {
       toast.error("There are no files to submit.");
@@ -252,29 +271,22 @@ export function UploadForm() {
         const allFilesWereSubmitted = filesToSubmit.length === files.length;
 
         if (allFilesWereSubmitted) {
-          // If ALL files were submitted, show the success screen and navigate away.
           dispatch(setSuccess("Submission complete!"));
           setTimeout(() => {
             router.push(saveAsDraft ? '/contributor/drafts' : '/contributor/under-review');
             dispatch(clearFiles());
           }, 1500);
         } else {
-          // **THE FIX**: If only a subset of files was submitted, we
-          // re-fetch the pending uploads from the server. This will update
-          // the UI to show only the remaining, unsubmitted files.
           await loadInitialFiles();
         }
       } else {
-        // Handle cases where backend reports 0 files processed, possibly due to a state mismatch.
         toast.error("No files were submitted. They may have been processed already.", { id: "submit-toast" });
-        await loadInitialFiles(); // Refresh state to match the backend.
+        await loadInitialFiles();
       }
     } catch (err: any) {
       toast.error(`Submission failed: ${err.message}`, { id: "submit-toast" });
       dispatch(setError(err.message));
     } finally {
-      // The `isUploading` state should be cleared unless a full-success navigation
-      // is happening, but clearing it is safe in all cases.
       dispatch(setUploading(false));
     }
   };
@@ -519,7 +531,7 @@ export function UploadForm() {
   const selectAll = () => setSelectedFiles(files.map((_, index) => index));
   const clearSelection = () => {
     setSelectedFiles([]);
-    setActiveFileIndex(null); // Also deactivate any active file when clearing selection
+    setActiveFileIndex(null);
   }
 
   if (initialLoading) {
@@ -558,7 +570,8 @@ export function UploadForm() {
                     <h2 className="text-2xl font-medium text-white mb-2">Drag & drop your images here</h2>
                     <p className="text-gray-400 mb-8">Or click to browse files</p>
                     <button type="button" className="bg-indigo-600 hover:bg-indigo-700 text-white transition-colors px-8 py-3 rounded-lg font-medium text-lg">Select Files</button>
-                    <p className="text-gray-500 text-sm mt-8">Maximum file size: 50MB</p>
+                    {/* MODIFIED: Updated text to show correct file size limit */}
+                    <p className="text-gray-500 text-sm mt-8">Maximum file size: {MAX_SINGLE_FILE_SIZE / 1024 / 1024}MB</p>
                   </div>
                 </div>
               </div>
