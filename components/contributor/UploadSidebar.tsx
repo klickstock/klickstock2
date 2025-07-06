@@ -2,17 +2,26 @@
 
 import { useDispatch } from "react-redux";
 import {
-  X, Plus, Sparkles, ChevronLeft, Trash2
+  X,
+  Plus,
+  Sparkles,
+  Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { updateFile } from "@/redux/features/uploadSlice";
-import { UploadFile } from "@/redux/features/uploadSlice"; // Import the type for clarity
+import { UploadFile } from "@/redux/features/uploadSlice";
 import {
   categoryOptions,
   licenseOptions,
@@ -25,23 +34,24 @@ const IMAGE_TYPE_OPTIONS = imageTypeOptions;
 const CATEGORY_OPTIONS = categoryOptions;
 
 type UploadSidebarProps = {
-  files: UploadFile[]; // Use the specific type
+  files: UploadFile[];
   activeFileIndex: number | null;
   setActiveFileIndex: (index: number | null) => void;
   newTag: string;
   setNewTag: (tag: string) => void;
   handleAddTag: (index: number) => void;
   handleRemoveTag: (fileIndex: number, tagIndex: number) => void;
-  handleRemoveFile: (index: number) => void; // This now triggers the server deletion
+  handleRemoveFile: (index: number) => void;
   selectedFiles: number[];
   isGenerating: boolean;
   isGeneratingBulk: boolean;
   generateContentWithAI: () => void;
-  generateContentWithAIForAll?: () => void; // Made optional as it's not in the previous code
+  generateContentWithAIForAll?: () => void;
   isUploading: boolean;
-  transparentImages: { [key: string]: boolean }; // Key is now the file ID string
+  transparentImages: { [key: string]: boolean | null };
   handleSubmitAll: (saveDraft: boolean) => void;
   isFileComplete: (file: UploadFile) => boolean;
+  // REMOVED unused props: canSubmitForReview, canSaveAsDraft
 };
 
 export function UploadSidebar({
@@ -71,23 +81,36 @@ export function UploadSidebar({
 
   const activeFile = files[activeFileIndex];
 
+  // --- START OF FIX ---
+  // 1. Get the actual file objects that are currently selected for editing.
+  const filesBeingEdited = selectedFiles.map(index => files[index]);
+
+  // 2. Define a function to check if a file is "draftable" (less strict than "complete").
+  const isFileDraftable = (file: UploadFile) => {
+    return Boolean(file.title?.trim() && file.description?.trim());
+  };
+
+  // 3. Check if ALL selected files meet the criteria for drafting or submitting.
+  //    The `.every()` method ensures that every single file in the selection passes the test.
+  const canSaveSelectionAsDraft = filesBeingEdited.length > 0 && filesBeingEdited.every(isFileDraftable);
+  const canSubmitSelectionForReview = filesBeingEdited.length > 0 && filesBeingEdited.every(isFileComplete);
+  // --- END OF FIX ---
+
   return (
     <div className="absolute top-0 right-0 bottom-0 w-[400px] bg-gray-950 border-l border-gray-800/50 overflow-hidden z-50 flex flex-col h-screen shadow-xl max-h-full">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
         <div className="flex items-center gap-2">
-          {/* This button should probably just close the sidebar view, not nullify the index */}
           <h3 className="text-lg font-medium text-white">
             {selectedFiles.length > 1
               ? `Edit ${selectedFiles.length} Images`
-              : 'Edit Image Details'}
+              : "Edit Image Details"}
           </h3>
         </div>
         <button
           type="button"
           onClick={() => {
-            if (confirm('Are you sure you want to permanently delete this image?')) {
-              // This correctly calls the parent handler which triggers server-side deletion
+            if (confirm("Are you sure you want to permanently delete this image?")) {
               handleRemoveFile(activeFileIndex);
             }
           }}
@@ -102,11 +125,8 @@ export function UploadSidebar({
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Image preview and AI button section */}
         <div className="p-4 bg-gray-900/30 border-b border-gray-800/50">
-          <div
-            className="relative h-48 rounded-lg overflow-hidden bg-gray-900 group border border-gray-700/50"
-          >
-            {/* FIX: Use file ID for transparentImages key */}
-            {activeFile.imageType === 'PNG' && transparentImages[activeFile.id] && (
+          <div className="relative h-48 rounded-lg overflow-hidden bg-gray-900 group border border-gray-700/50">
+            {activeFile.imageType === "PNG" && transparentImages[activeFile.id] && (
               <div
                 className="absolute inset-0 bg-[length:16px_16px] bg-[linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937),linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937)]"
                 style={{
@@ -116,12 +136,11 @@ export function UploadSidebar({
                 }}
               />
             )}
-            {/* FIX: Use `previewUrl` instead of `preview` */}
             <img
               src={activeFile.previewUrl}
               alt={activeFile.title || `Image ${activeFileIndex + 1}`}
-              className={`w-full h-full pointer-events-none ${activeFile.imageType === 'PNG' && transparentImages[activeFile.id] ? 'object-contain' : 'object-cover'}`}
-              style={{ position: 'relative', zIndex: 1 }}
+              className={`w-full h-full pointer-events-none ${activeFile.imageType === "PNG" && transparentImages[activeFile.id] ? "object-contain" : "object-cover"}`}
+              style={{ position: "relative", zIndex: 1 }}
               draggable="false"
             />
           </div>
@@ -153,8 +172,9 @@ export function UploadSidebar({
           )}
         </div>
 
-        {/* Form fields - make this scrollable */}
+        {/* Form fields - scrollable */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          {/* ... (rest of the form fields remain the same) ... */}
           <div>
             <Label htmlFor="sidebar-title" className="text-gray-300 flex items-center">
               Title <span className="text-red-400 ml-1">*</span>
@@ -212,7 +232,11 @@ export function UploadSidebar({
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
                   {CATEGORY_OPTIONS.map((category) => (
-                    <SelectItem key={category.value} value={category.value} className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700">
+                    <SelectItem
+                      key={category.value}
+                      value={category.value}
+                      className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700"
+                    >
                       {category.label}
                     </SelectItem>
                   ))}
@@ -238,7 +262,11 @@ export function UploadSidebar({
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
                   {LICENSE_OPTIONS.map((license) => (
-                    <SelectItem key={license.value} value={license.value} className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700">
+                    <SelectItem
+                      key={license.value}
+                      value={license.value}
+                      className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700"
+                    >
                       {license.label}
                     </SelectItem>
                   ))}
@@ -266,7 +294,11 @@ export function UploadSidebar({
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
                   {IMAGE_TYPE_OPTIONS.map((type) => (
-                    <SelectItem key={type.value} value={type.value} className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700">
+                    <SelectItem
+                      key={type.value}
+                      value={type.value}
+                      className="text-gray-200 hover:bg-gray-700 focus:bg-gray-700"
+                    >
                       {type.label}
                     </SelectItem>
                   ))}
@@ -281,9 +313,9 @@ export function UploadSidebar({
               <div className="flex items-center gap-2">
                 <Switch
                   id="sidebar-ai-status"
-                  checked={activeFile.aiGeneratedStatus === 'AI_GENERATED'}
+                  checked={activeFile.aiGeneratedStatus === "AI_GENERATED"}
                   onCheckedChange={(checked: boolean) => {
-                    const newStatus = checked ? 'AI_GENERATED' : 'NOT_AI_GENERATED';
+                    const newStatus = checked ? "AI_GENERATED" : "NOT_AI_GENERATED";
                     dispatch(updateFile({
                       index: activeFileIndex,
                       data: { aiGeneratedStatus: newStatus }
@@ -291,7 +323,7 @@ export function UploadSidebar({
                   }}
                 />
                 <span className="text-sm text-gray-400">
-                  {activeFile.aiGeneratedStatus === 'AI_GENERATED' ? "Yes" : "No"}
+                  {activeFile.aiGeneratedStatus === "AI_GENERATED" ? "Yes" : "No"}
                 </span>
               </div>
             </div>
@@ -304,9 +336,16 @@ export function UploadSidebar({
             </Label>
             <div className="flex flex-wrap gap-2 mt-2 min-h-[40px] p-2 border rounded-md border-gray-700 bg-gray-900">
               {activeFile.tags.map((tag: string, tagIndex: number) => (
-                <Badge key={tagIndex} className="gap-1 bg-indigo-900/60 text-indigo-300 hover:bg-indigo-800/60 border border-indigo-800">
+                <Badge
+                  key={tagIndex}
+                  className="gap-1 bg-indigo-900/60 text-indigo-300 hover:bg-indigo-800/60 border border-indigo-800"
+                >
                   {tag}
-                  <button type="button" onClick={() => handleRemoveTag(activeFileIndex, tagIndex)} className="ml-1 text-indigo-300 hover:text-indigo-100">
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveTag(activeFileIndex, tagIndex)}
+                    className="ml-1 text-indigo-300 hover:text-indigo-100"
+                  >
                     <X className="h-3 w-3" />
                   </button>
                 </Badge>
@@ -318,14 +357,18 @@ export function UploadSidebar({
                 value={newTag}
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === "Enter") {
                     e.preventDefault();
                     handleAddTag(activeFileIndex);
                   }
                 }}
                 className="bg-gray-800 border-gray-700 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500 h-10"
               />
-              <Button type="button" onClick={() => handleAddTag(activeFileIndex)} className="bg-gray-800 text-gray-200 border-gray-700 hover:bg-gray-700 hover:text-white h-10 px-4 flex items-center justify-center">
+              <Button
+                type="button"
+                onClick={() => handleAddTag(activeFileIndex)}
+                className="bg-gray-800 text-gray-200 border-gray-700 hover:bg-gray-700 hover:text-white h-10 px-4 flex items-center justify-center"
+              >
                 <Plus className="h-4 w-4 mr-2" /> Add
               </Button>
             </div>
@@ -340,15 +383,25 @@ export function UploadSidebar({
           <Button
             type="button"
             onClick={() => handleSubmitAll(true)}
-            disabled={isUploading}
-            className="flex-1 border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white"
+            disabled={isUploading || !canSaveSelectionAsDraft}
+            title={
+              !canSaveSelectionAsDraft
+                ? "All selected images must have a title and description to be saved as a draft."
+                : "Save selected images as drafts"
+            }
+            className="flex-1 border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white disabled:bg-gray-800/50 disabled:cursor-not-allowed"
           >
             Save as Draft
           </Button>
           <Button
             type="button"
             onClick={() => handleSubmitAll(false)}
-            disabled={isUploading || !isFileComplete(activeFile)}
+            disabled={isUploading || !canSubmitSelectionForReview}
+            title={
+              !canSubmitSelectionForReview
+                ? "All selected images must have all required fields completed to be submitted."
+                : "Submit selected images for review"
+            }
             className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-indigo-800/50 disabled:cursor-not-allowed"
           >
             {isUploading ? "Submitting..." : "Submit for Review"}

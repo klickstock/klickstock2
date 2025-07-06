@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useDeferredValue } from "react";
 import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
 import {
-  X, Upload, Check, CheckSquare, Square, Loader2
+  X, Upload, Check, CheckSquare, Square, Loader2, AlertCircle
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,11 @@ import {
   handleInitialUploads,
   getInitialUploadsWithSignedUrls,
   deleteInitialUpload,
-  createContributorItemsFromUploads
+  createContributorItemsFromUploads,
+  deleteAllInitialUploads
 } from "@/actions/contributor";
+import { getBase64FromUrl } from "@/actions/getBase64FromUrl";
+
 import { RootState } from "@/redux/store";
 import { toast } from "sonner";
 import {
@@ -30,7 +33,16 @@ import {
 } from "@/lib/constants";
 import { UploadSidebar } from "./UploadSidebar";
 import { UploadFile } from "@/redux/features/uploadSlice";
-
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Maximum file size (50MB)
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -40,7 +52,7 @@ const CATEGORY_OPTIONS = categoryOptions;
 const hasTransparency = (imageUrl: string): Promise<boolean> => {
   return new Promise((resolve) => {
     const img = new Image();
-    img.crossOrigin = "Anonymous"; // Crucial for loading from a different origin (S3)
+    img.crossOrigin = "Anonymous";
     img.onload = function () {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
@@ -66,7 +78,6 @@ const hasTransparency = (imageUrl: string): Promise<boolean> => {
   });
 };
 
-
 export function UploadForm() {
   const router = useRouter();
   const dispatch = useDispatch();
@@ -75,20 +86,24 @@ export function UploadForm() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [activeFileIndex, setActiveFileIndex] = useState<number | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
 
-  // States for UI and features
   const [newTag, setNewTag] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
-  const [transparentImages, setTransparentImages] = useState<{ [key: string]: boolean }>({});
+  const [transparentImages, setTransparentImages] = useState<{ [key: string]: boolean | null }>({});
 
-  // 1. Fetch initial files from the server on component mount
+
+  // Use deferred value for smooth rendering of images
+  const deferredFiles = useDeferredValue(files);
+
   const loadInitialFiles = useCallback(async () => {
     try {
       const initialFiles = await getInitialUploadsWithSignedUrls();
       dispatch(setFiles(initialFiles));
       if (initialFiles.length > 0) {
         setActiveFileIndex(0);
+        setSelectedFiles([0]);
       }
     } catch (err: any) {
       toast.error("Failed to load your pending uploads.");
@@ -101,18 +116,15 @@ export function UploadForm() {
   useEffect(() => {
     loadInitialFiles();
     return () => {
-      // Clear Redux state on unmount to prevent showing stale data
       dispatch(clearFiles());
-    }
+    };
   }, [loadInitialFiles, dispatch]);
 
-  // 2. Handle new file drops by uploading them immediately
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
     dispatch(setUploading(true));
-    dispatch(setError(null));
-    toast.loading("Uploading your files... This may take a moment.", { id: "upload-toast" });
+    toast.loading("Uploading your files...", { id: "upload-toast" });
 
     const formData = new FormData();
     acceptedFiles.forEach(file => {
@@ -121,8 +133,8 @@ export function UploadForm() {
 
     try {
       await handleInitialUploads(formData);
-      toast.success("Files uploaded! You can now add details.", { id: "upload-toast", duration: 4000 });
-      await loadInitialFiles(); // Refresh the list from the server to include new files
+      toast.success("Files uploaded successfully!", { id: "upload-toast", duration: 4000 });
+      await loadInitialFiles();
     } catch (err: any) {
       toast.error(`Upload failed: ${err.message}`, { id: "upload-toast" });
       dispatch(setError(err.message));
@@ -149,7 +161,6 @@ export function UploadForm() {
     }
   });
 
-  // 3. Handle deleting a file from the server and UI
   const handleRemoveFile = async (index: number) => {
     const fileToRemove = files[index];
     if (!fileToRemove) return;
@@ -157,10 +168,7 @@ export function UploadForm() {
     const originalFileCount = files.length;
     toast.loading(`Deleting ${fileToRemove.originalFileName}...`, { id: `delete-${fileToRemove.id}` });
 
-    // Optimistically remove from UI
     dispatch(removeFileById(fileToRemove.id));
-
-    // Adjust active/selected indices
     setSelectedFiles(prev => prev.filter(i => i !== index).map(i => i > index ? i - 1 : i));
     if (activeFileIndex === index) {
       setActiveFileIndex(originalFileCount > 1 ? 0 : null);
@@ -173,26 +181,55 @@ export function UploadForm() {
       toast.success("File deleted successfully.", { id: `delete-${fileToRemove.id}` });
     } catch (err: any) {
       toast.error(`Failed to delete file: ${err.message}`, { id: `delete-${fileToRemove.id}` });
-      // On failure, reload from the server to restore the correct state
       await loadInitialFiles();
     }
   };
 
-  // 4. Handle final submission of metadata
+  const confirmDeleteAll = async () => {
+    if (files.length === 0) return;
+    toast.loading(`Deleting all ${files.length} files...`, { id: "delete-all-toast" });
+    const fileIds = files.map(f => f.id);
+
+    try {
+      const result = await deleteAllInitialUploads(fileIds);
+      toast.success(`${result.count} files deleted successfully.`, { id: "delete-all-toast" });
+      dispatch(clearFiles());
+      setActiveFileIndex(null);
+      setSelectedFiles([]);
+    } catch (err: any) {
+      toast.error(`Failed to delete all files: ${err.message}`, { id: "delete-all-toast" });
+      await loadInitialFiles();
+    } finally {
+      setShowDeleteAllDialog(false);
+    }
+  };
+
+  const isFileComplete = (file: UploadFile) => {
+    return Boolean(
+      file.title?.trim() &&
+      file.category?.trim() &&
+      file.imageType &&
+      file.aiGeneratedStatus &&
+      file.description?.trim() &&
+      file.tags.length > 0
+    );
+  };
+
+  const canSubmitForReview = files.some(isFileComplete);
+  const canSaveAsDraft = files.some(file => file.title?.trim() && file.description?.trim());
+
   const handleSubmitAll = async (saveAsDraft: boolean = false) => {
     if (files.length === 0) {
       toast.error("There are no files to submit.");
       return;
     }
 
-    const isFileComplete = (file: UploadFile) => file.title?.trim() && file.category?.trim() && file.tags.length > 0;
-
     const filesToSubmit = files
-      .filter(file => saveAsDraft ? file.title?.trim() : isFileComplete(file))
-      .map(({ previewUrl, originalFileName, ...rest }) => rest); // Exclude client-only fields
+      .filter(file => saveAsDraft ? (file.title?.trim() && file.description?.trim()) : isFileComplete(file))
+      .map(({ previewUrl, originalFileName, ...rest }) => rest);
 
     if (filesToSubmit.length === 0) {
-      toast.error(saveAsDraft ? "Add a title to at least one image to save it as a draft." : "Complete required fields (title, category, tags) for at least one image.");
+      toast.error(saveAsDraft ? "Add a title and description to at least one image to save it as a draft." : "Complete required fields (title, category, description, tags) for at least one image.");
       return;
     }
 
@@ -204,11 +241,10 @@ export function UploadForm() {
 
       if (result.count > 0) {
         toast.success(`${result.count} file(s) were successfully ${saveAsDraft ? 'saved as drafts' : 'submitted'}.`, { id: "submit-toast" });
-        dispatch(setSuccess("Submission complete!")); // Use Redux success state for screen change
+        dispatch(setSuccess("Submission complete!"));
 
         setTimeout(() => {
           router.push(saveAsDraft ? '/contributor/drafts' : '/contributor/under-review');
-          // Reset state after redirection
           dispatch(clearFiles());
         }, 1500);
       } else {
@@ -222,10 +258,10 @@ export function UploadForm() {
     }
   };
 
-  // Effect to check transparency for PNGs when files are loaded
   useEffect(() => {
     files.forEach(async (file) => {
-      if (file.imageType === 'PNG' && file.previewUrl && !transparentImages[file.id]) {
+      if (file.imageType === 'PNG' && file.previewUrl && transparentImages[file.id] === undefined) {
+        setTransparentImages(prev => ({ ...prev, [file.id]: null }));
         const isTransparent = await hasTransparency(file.previewUrl);
         setTransparentImages(prev => ({
           ...prev,
@@ -233,20 +269,27 @@ export function UploadForm() {
         }));
       }
     });
-  }, [files, transparentImages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files]);
 
-  // Effect to manage active file index
+  // FIX: This useEffect was removed as it was conflicting with user-driven state changes
+  // from event handlers like `toggleFileSelection`, causing an infinite render loop.
+  // The logic for managing active/selected files is now correctly and sufficiently
+  // handled within the event handlers themselves (e.g., loadInitialFiles, handleRemoveFile).
+  /*
   useEffect(() => {
-    if (files.length > 0 && activeFileIndex === null) {
+    if (files.length > 0 && activeFileIndex === null && selectedFiles.length === 0) {
       setActiveFileIndex(0);
+      setSelectedFiles([0]);
     } else if (files.length === 0) {
       setActiveFileIndex(null);
+      setSelectedFiles([]);
     } else if (activeFileIndex !== null && activeFileIndex >= files.length) {
       setActiveFileIndex(files.length - 1);
     }
-  }, [files, activeFileIndex]);
+  }, [files, activeFileIndex, selectedFiles]);
+  */
 
-  // Handle adding a new tag
   const handleAddTag = (index: number) => {
     if (!newTag.trim()) return;
     const file = files[index];
@@ -259,7 +302,6 @@ export function UploadForm() {
     setNewTag("");
   };
 
-  // Handle removing a tag
   const handleRemoveTag = (fileIndex: number, tagIndex: number) => {
     const newTags = [...files[fileIndex].tags];
     newTags.splice(tagIndex, 1);
@@ -267,20 +309,6 @@ export function UploadForm() {
   };
 
 
-  // Helper function to convert a Blob to a Base64 string
-  const blobToBase64 = (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        // result contains the Data URL. We only need the Base64 part.
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-  // Generate content with Gemini AI (Corrected for S3 URLs)
   const generateContentWithAI = async () => {
     if (activeFileIndex === null) return;
 
@@ -302,15 +330,11 @@ export function UploadForm() {
     try {
       const file = files[activeFileIndex];
 
-      // 1. Fetch the image from the S3 signed URL
-      const imageResponse = await fetch(file.previewUrl);
-      if (!imageResponse.ok) {
-        throw new Error("Failed to fetch image from storage for AI analysis.");
+      const imageResult = await getBase64FromUrl(file.previewUrl);
+      if (!imageResult.success || !imageResult.base64) {
+        throw new Error(imageResult.error || "Failed to process image for AI analysis.");
       }
-      const imageBlob = await imageResponse.blob();
-
-      // 2. Convert the fetched blob to a Base64 string
-      const imageBase64 = await blobToBase64(imageBlob);
+      const imageBase64 = imageResult.base64;
 
       const availableCategories = CATEGORY_OPTIONS.map(cat => cat.value).join(", ");
 
@@ -323,8 +347,7 @@ export function UploadForm() {
               { text: `Generate a professional title, detailed description, 20-40 relevant keywords, and select the most appropriate category for this image. The category MUST be chosen from this exact list: ${availableCategories}. Format your response as a single, clean JSON object with fields: "title", "description", "keywords" (as an array of strings), and "category" (must match one from the list exactly). Do not include any special characters or markdown formatting like \`\`\`json.` },
               {
                 inline_data: {
-                  // 3. Use the correct MIME type and the new Base64 data
-                  mime_type: file.imageType.startsWith('PNG') ? 'image/png' : 'image/jpeg', // Assuming imageType is 'PNG' or 'JPG'
+                  mime_type: file.imageType.startsWith('PNG') ? 'image/png' : 'image/jpeg',
                   data: imageBase64
                 }
               }
@@ -334,7 +357,12 @@ export function UploadForm() {
         })
       });
 
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: "Could not parse API error response." } }));
+        throw new Error(errorData.error?.message || `API error: ${response.statusText}`);
+      }
       const data = await response.json();
+
       if (data.error) throw new Error(data.error.message || "Error generating content");
 
       const textResponse = data.candidates[0].content.parts[0].text;
@@ -343,7 +371,7 @@ export function UploadForm() {
 
       const generatedContent = JSON.parse(jsonMatch[0]);
       if (!CATEGORY_OPTIONS.some(cat => cat.value === generatedContent.category)) {
-        generatedContent.category = ''; // Invalidate category if not in our list
+        generatedContent.category = '';
         toast.warning("AI suggested a category that doesn't exist. Please select one manually.");
       }
 
@@ -367,7 +395,7 @@ export function UploadForm() {
     }
   };
 
-  // Generate content with AI for all selected images (Corrected for S3 URLs)
+
   const generateContentWithAIForAll = async () => {
     if (selectedFiles.length === 0) {
       toast.error("No images selected for AI generation.");
@@ -397,13 +425,11 @@ export function UploadForm() {
       toast.loading(`Processing image ${processedCount + 1}/${selectedFiles.length}...`, { id: `ai-gen-${file.id}` });
 
       try {
-        // 1. Fetch the image from the S3 signed URL
-        const imageResponse = await fetch(file.previewUrl);
-        if (!imageResponse.ok) throw new Error("Failed to fetch image from storage.");
-        const imageBlob = await imageResponse.blob();
-
-        // 2. Convert the fetched blob to a Base64 string
-        const imageBase64 = await blobToBase64(imageBlob);
+        const imageResult = await getBase64FromUrl(file.previewUrl);
+        if (!imageResult.success || !imageResult.base64) {
+          throw new Error(imageResult.error || "Failed to process image.");
+        }
+        const imageBase64 = imageResult.base64;
 
         const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey, {
           method: "POST",
@@ -414,7 +440,6 @@ export function UploadForm() {
                 { text: `Generate a professional title, detailed description, 5-7 relevant keywords, and select the most appropriate category for this image. The category MUST be chosen from this exact list: ${availableCategories}. Format your response as a single, clean JSON object with fields: "title", "description", "keywords" (as an array of strings), and "category" (must match one from the list exactly). Do not include any special characters or markdown formatting like \`\`\`json.` },
                 {
                   inline_data: {
-                    // 3. Use the correct MIME type and the new Base64 data
                     mime_type: file.imageType.startsWith('PNG') ? 'image/png' : 'image/jpeg',
                     data: imageBase64
                   }
@@ -425,9 +450,13 @@ export function UploadForm() {
           })
         });
 
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: { message: "Could not parse API error response." } }));
+          throw new Error(errorData.error?.message || `API error: ${response.statusText}`);
+        }
         const data = await response.json();
-        if (data.error) throw new Error(data.error.message || "Error generating content");
 
+        if (data.error) throw new Error(data.error.message || "Error generating content");
         const textResponse = data.candidates[0].content.parts[0].text;
         const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error("Invalid JSON response format from AI.");
@@ -455,7 +484,6 @@ export function UploadForm() {
         toast.error(`Failed for image ${processedCount + failedCount}`, { id: `ai-gen-${file.id}` });
       }
 
-      // Small delay to avoid API rate limiting issues
       if (selectedFiles.length > 1 && (processedCount + failedCount) < selectedFiles.length) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -467,26 +495,29 @@ export function UploadForm() {
     setIsGeneratingBulk(false);
   };
 
-  // Bulk Selection Logic
+  const handleActivateFile = (index: number) => {
+    setActiveFileIndex(index);
+    setSelectedFiles(prev => (prev.includes(index) ? prev : [...prev, index]));
+  };
+
   const toggleFileSelection = (index: number, event: React.MouseEvent) => {
     event.stopPropagation();
-    setActiveFileIndex(index);
-    setSelectedFiles(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]);
-  };
-  const selectAll = () => setSelectedFiles(files.map((_, index) => index));
-  const clearSelection = () => setSelectedFiles([]);
-
-  // Check if a file's metadata is complete
-  const isFileComplete = (file: UploadFile) => {
-    return Boolean(
-      file.title?.trim() &&
-      file.category?.trim() &&
-      file.imageType &&
-      file.aiGeneratedStatus &&
-      file.description?.trim() &&
-      file.tags.length > 0
+    const isCurrentlySelected = selectedFiles.includes(index);
+    if (isCurrentlySelected && activeFileIndex === index) {
+      setActiveFileIndex(null);
+    }
+    setSelectedFiles(prev =>
+      isCurrentlySelected
+        ? prev.filter(i => i !== index)
+        : [...prev, index]
     );
   };
+
+  const selectAll = () => setSelectedFiles(files.map((_, index) => index));
+  const clearSelection = () => {
+    setSelectedFiles([]);
+    setActiveFileIndex(null); // Also deactivate any active file when clearing selection
+  }
 
   if (initialLoading) {
     return (
@@ -498,7 +529,7 @@ export function UploadForm() {
   }
 
   return (
-    <div className="relative  flex flex-col h-full">
+    <div className="relative flex flex-col h-full">
       <div className="w-full mx-auto px-6 py-6 h-full relative">
         {success ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -530,20 +561,23 @@ export function UploadForm() {
               </div>
             ) : (
               <div className="h-full">
-                <div className="pr-[380px] h-full ">
+                <div className="pr-[380px] h-full">
                   <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-4">
                       <h3 className="text-xl font-medium text-white">{files.length} image{files.length !== 1 ? 's' : ''} ready</h3>
                       {isUploading && (
                         <div className="flex items-center gap-2 px-3 py-1 bg-indigo-600/20 border border-indigo-500/30 rounded-lg">
                           <Loader2 className="h-4 w-4 text-indigo-400 animate-spin" />
-                          <span className="text-sm text-indigo-300 font-medium">Processing...</span>
+                          <span className="text-sm text-indigo-300 font-medium">Uploading...</span>
                         </div>
                       )}
                     </div>
                     <div className="flex items-center gap-3">
                       <button type="button" onClick={selectedFiles.length === files.length ? clearSelection : selectAll} disabled={isUploading} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-md text-sm font-medium transition-colors disabled:opacity-50">
                         {selectedFiles.length === files.length ? "Deselect All" : "Select All"}
+                      </button>
+                      <button type="button" onClick={() => setShowDeleteAllDialog(true)} disabled={isUploading || files.length === 0} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50">
+                        Clear All
                       </button>
                       <div {...getRootProps()} className={`flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-md text-sm font-medium transition-colors ${isUploading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
                         <input {...getInputProps()} />
@@ -556,30 +590,30 @@ export function UploadForm() {
                   {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 max-h-[calc(100vh-300px)] overflow-y-auto pr-12 custom-scrollbar scroll-smooth">
-                    {files.map((file, index) => {
+                    {deferredFiles.map((file, index) => {
                       const isComplete = isFileComplete(file);
-                      const isSelected = index === activeFileIndex;
-                      const isBulkSelected = selectedFiles.includes(index);
+                      const isSelectedForEditing = index === activeFileIndex;
+                      const isSelectedForBulk = selectedFiles.includes(index);
 
                       return (
                         <div
                           key={file.id}
-                          className={`relative group cursor-pointer overflow-hidden rounded-lg shadow-md transition-all ${isSelected ? 'border-2 border-indigo-500 ring-2 ring-indigo-500/30' : isBulkSelected ? 'border-2 border-indigo-400 ring-1 ring-indigo-400/20' : 'border border-gray-700 hover:border-gray-600'}`}
-                          onClick={() => setActiveFileIndex(index)}
+                          className={`relative group cursor-pointer overflow-hidden rounded-lg shadow-md transition-all ${isSelectedForEditing ? 'border-2 border-indigo-500 ring-2 ring-indigo-500/30' : isSelectedForBulk ? 'border-2 border-indigo-400 ring-1 ring-indigo-400/20' : 'border border-gray-700 hover:border-gray-600'}`}
+                          onClick={() => handleActivateFile(index)}
                           style={{ aspectRatio: '1/1', backgroundColor: '#1f2937' }}>
                           <div className="absolute top-2 left-2 z-30" title={isComplete ? "Complete" : "Incomplete"}>
                             {isComplete ? <div className="w-7 h-7 flex items-center justify-center bg-green-500/80 text-white rounded-full"><Check className="h-4 w-4" /></div> : <div className="w-7 h-7 flex items-center justify-center bg-red-500/70 text-white rounded-full"><X className="h-4 w-4" /></div>}
                           </div>
                           <div className="absolute top-2 right-2 z-20">
                             <button type="button" onClick={(e) => toggleFileSelection(index, e)} className="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-black/60 rounded-md transition-colors">
-                              {isBulkSelected ? <CheckSquare className="h-5 w-5 text-indigo-400" /> : <Square className="h-5 w-5 text-gray-300 group-hover:text-white" />}
+                              {isSelectedForBulk ? <CheckSquare className="h-5 w-5 text-indigo-400" /> : <Square className="h-5 w-5 text-gray-300 group-hover:text-white" />}
                             </button>
                           </div>
                           <div className="absolute inset-0 flex items-center justify-center">
                             {file.imageType === 'PNG' && transparentImages[file.id] && (
                               <div className="absolute inset-0 bg-[length:16px_16px] bg-[linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937),linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937)]" style={{ backgroundPosition: "0 0, 8px 8px", backgroundSize: "16px 16px", zIndex: 0 }} />
                             )}
-                            <img src={file.previewUrl} alt={file.title} className={`w-full h-full transition-transform duration-200 group-hover:scale-105 ${file.imageType === 'PNG' && transparentImages[file.id] ? 'object-contain bg-transparent' : 'object-cover'}`} style={{ position: 'relative', zIndex: 1 }} />
+                            <img src={file.previewUrl} alt={file.title || ''} className={`w-full h-full transition-transform duration-200 group-hover:scale-105 ${file.imageType === 'PNG' && transparentImages[file.id] ? 'object-contain bg-transparent' : 'object-cover'}`} style={{ position: 'relative', zIndex: 1 }} />
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-200" />
                           </div>
                         </div>
@@ -611,6 +645,25 @@ export function UploadForm() {
                 isFileComplete={isFileComplete}
               />
             )}
+
+            <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
+              <AlertDialogContent className="bg-gray-800 border-gray-700 text-white">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                  <AlertDialogDescription className="text-gray-400">
+                    This action will delete all {files.length} uploaded images. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="bg-transparent border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white">
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction onClick={confirmDeleteAll} className="bg-red-600 hover:bg-red-700">
+                    Delete All
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </>
         )}
       </div>

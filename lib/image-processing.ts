@@ -219,26 +219,22 @@ import sharp from 'sharp';
 
 const PREVIEW_MAX_WIDTH = 800;
 const WATERMARK_TEXT = 'KlickStock';
+const TILE_SIZE = 300; // Size of the watermark tile
 
-// --- Performance Optimization ---
-// We generate the watermark tile buffer once and cache it in memory.
-// This avoids regenerating the SVG and converting it to a buffer on every single image upload.
+// Cache for the watermark tile buffer
 let watermarkTileBuffer: Buffer | null = null;
 
 /**
  * Creates a small, transparent, repeatable watermark tile as a PNG buffer.
- * This is the most memory-efficient approach for tiling.
+ * Cached in memory for performance.
  */
 async function getWatermarkTileBuffer(): Promise<Buffer> {
-  // If the buffer is already cached, return it immediately.
   if (watermarkTileBuffer) {
     return watermarkTileBuffer;
   }
 
-  // Define the SVG for a single, rotated piece of text on a transparent background.
-  const tileSize = 300; // The size of our repeatable tile.
   const svg = `
-    <svg width="${tileSize}" height="${tileSize}" xmlns="http://www.w3.org/2000/svg">
+    <svg width="${TILE_SIZE}" height="${TILE_SIZE}" xmlns="http://www.w3.org/2000/svg">
       <style>
         .watermark { font-family: Arial, sans-serif; font-weight: bold; }
       </style>
@@ -249,77 +245,108 @@ async function getWatermarkTileBuffer(): Promise<Buffer> {
         fill="rgba(255, 255, 255, 0.25)"
         text-anchor="middle"
         dominant-baseline="middle"
-        transform="rotate(-45, ${tileSize / 2}, ${tileSize / 2})"
+        transform="rotate(-45, ${TILE_SIZE / 2}, ${TILE_SIZE / 2})"
         class="watermark"
       >${WATERMARK_TEXT}</text>
     </svg>
   `;
 
-  // Convert the small SVG to a PNG buffer and cache it.
   watermarkTileBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
-
   return watermarkTileBuffer;
 }
 
-
 /**
- * Generates a preview image by resizing the original and overlaying a tiled watermark.
- * This is the primary function to be used.
+ * Generates a preview image by resizing the original and overlaying a tiled or single watermark.
+ * Handles both large and small images to avoid dimension errors.
  *
  * @param imageBuffer The buffer of the original uploaded image.
  * @returns A promise that resolves to the buffer of the watermarked preview image (as JPEG).
  */
 export async function generatePreviewWithWatermark(imageBuffer: Buffer): Promise<Buffer> {
   try {
-    // Get the small, cached watermark tile.
-    const tileBuffer = await getWatermarkTileBuffer();
-
-    // Process the main image.
-    const processedBuffer = await sharp(imageBuffer, {
-      failOnError: false, // Prevents crashing on slightly corrupt images
+    // Step 1: Resize the image and get its buffer
+    const resizedImage = await sharp(imageBuffer, {
+      failOnError: false,
     })
-      .rotate() // Auto-rotate based on EXIF orientation data
+      .rotate()
       .resize({
         width: PREVIEW_MAX_WIDTH,
-        fit: 'inside',          // Resize to fit within the dimensions
-        withoutEnlargement: true, // Don't make small images bigger
-      })
-      .composite([
-        {
-          input: tileBuffer,
-          tile: true, // This is the key! Sharp will efficiently tile the small buffer.
-          blend: 'over',
-        },
-      ])
-      .jpeg({
-        quality: 85,      // Good quality for previews
-        mozjpeg: true,    // Use MozJPEG for better compression
-        force: true,      // Always output a JPEG
+        fit: 'inside',
+        withoutEnlargement: true,
       })
       .toBuffer();
 
-    return processedBuffer;
+    // Step 2: Get the dimensions of the resized image
+    const { width, height } = await sharp(resizedImage).metadata();
+
+    if (!width || !height) {
+      throw new Error('Failed to retrieve image dimensions after resizing.');
+    }
+
+    let watermarkBuffer: Buffer;
+    let tile: boolean;
+
+    // Step 3: Decide watermark strategy based on image size
+    if (width >= TILE_SIZE && height >= TILE_SIZE) {
+      // Use cached tile with tiling for larger images
+      watermarkBuffer = await getWatermarkTileBuffer();
+      tile = true;
+    } else {
+      // Generate a single SVG overlay for smaller images
+      const fontSize = Math.min(width, height) / 10;
+      const svg = `
+        <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+          <style>
+            .watermark { font-family: Arial, sans-serif; font-weight: bold; }
+          </style>
+          <text
+            x="50%"
+            y="50%"
+            font-size="${fontSize}"
+            fill="rgba(255, 255, 255, 0.25)"
+            text-anchor="middle"
+            dominant-baseline="middle"
+            transform="rotate(-45, ${width / 2}, ${height / 2})"
+            class="watermark"
+          >${WATERMARK_TEXT}</text>
+        </svg>
+      `;
+      watermarkBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+      tile = false;
+    }
+
+    // Step 4: Composite the watermark onto the resized image
+    const finalBuffer = await sharp(resizedImage)
+      .composite([{
+        input: watermarkBuffer,
+        tile, // Tile if large, single overlay if small
+        blend: 'over',
+      }])
+      .jpeg({
+        quality: 85,
+        mozjpeg: true,
+        force: true,
+      })
+      .toBuffer();
+
+    return finalBuffer;
   } catch (error: any) {
     console.error('Error generating preview with watermark:', error);
-    // Re-throw a more informative error.
     throw new Error(`Failed to process image preview: ${error.message}`);
   }
 }
 
 /**
- * A safe wrapper for the watermark generation that returns null on failure.
- * This is what your server action should call to prevent crashes.
+ * A safe wrapper for watermark generation that returns null on failure.
  *
  * @param buffer The buffer of the original uploaded image.
- * @returns A promise that resolves to the watermarked buffer or NULL if an error occurs.
+ * @returns A promise that resolves to the watermarked buffer or null if an error occurs.
  */
 export async function generatePreviewWithWatermarkSafe(buffer: Buffer): Promise<Buffer | null> {
   try {
-    // We only need to call our main, robust function now.
     return await generatePreviewWithWatermark(buffer);
   } catch (error) {
     console.error("Safely caught error during watermark generation:", error);
-    // Return null so the calling action can handle the failure gracefully.
     return null;
   }
 }

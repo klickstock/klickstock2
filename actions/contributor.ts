@@ -71,35 +71,6 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
   }
 }
 
-/**
- * Deletes an initial upload record and its corresponding files from S3.
- */
-export async function deleteInitialUpload(id: string): Promise<{ success: boolean }> {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
-
-  const uploadToDelete = await db.initialUpload.findUnique({ where: { id } });
-
-  if (!uploadToDelete || uploadToDelete.userId !== session.user.id) {
-    throw new Error("Upload not found or you don't have permission to delete it.");
-  }
-  if (uploadToDelete.contributorItemId) {
-    throw new Error("Cannot delete an upload that has already been submitted.");
-  }
-
-  try {
-    await Promise.all([
-      deleteImageFromS3(uploadToDelete.s3Key),
-      deleteImageFromS3(uploadToDelete.previewS3Key)
-    ]);
-    await db.initialUpload.delete({ where: { id } });
-    revalidatePath('/contributor/upload');
-    return { success: true };
-  } catch (error: any) {
-    console.error("Delete initial upload error:", error);
-    throw new Error(error.message || "Failed to delete the upload.");
-  }
-}
 
 /**
  * Fetches initial uploads and attaches signed URLs for client-side display.
@@ -183,6 +154,35 @@ export async function deleteAllInitialUploads(fileIds: string[]): Promise<{ coun
   }
 }
 
+/**
+ * Deletes an initial upload record and its corresponding files from S3.
+ */
+export async function deleteInitialUpload(id: string): Promise<{ success: boolean }> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
+
+  const uploadToDelete = await db.initialUpload.findUnique({ where: { id } });
+
+  if (!uploadToDelete || uploadToDelete.userId !== session.user.id) {
+    throw new Error("Upload not found or you don't have permission to delete it.");
+  }
+  if (uploadToDelete.contributorItemId) {
+    throw new Error("Cannot delete an upload that has already been submitted.");
+  }
+
+  try {
+    await Promise.all([
+      deleteImageFromS3(uploadToDelete.s3Key),
+      deleteImageFromS3(uploadToDelete.previewS3Key)
+    ]);
+    await db.initialUpload.delete({ where: { id } });
+    revalidatePath('/contributor/upload');
+    return { success: true };
+  } catch (error: any) {
+    console.error("Delete initial upload error:", error);
+    throw new Error(error.message || "Failed to delete the upload.");
+  }
+}
 
 /**
  * NEW: Creates ContributorItem records from submitted initial uploads. This is the new "submit" logic.
