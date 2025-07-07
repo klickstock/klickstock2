@@ -93,27 +93,28 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
-// NEW MODEL FOR TECHNICAL UPLOADS
 model InitialUpload {
   id                String       @id @default(cuid())
-  
   originalFileName  String
   fileSize          Int
   mimeType          String
-
   s3Key             String       @unique
   previewS3Key      String       @unique
-  
   status            UploadStatus @default(UPLOADED)
-
   userId            String
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   contributorItemId String?      @unique
-  
+  title             String?
+  description       String?
+  tags              String[]     @default([])
+  category          String?
+  license           License      @default(STANDARD)
+  imageType         String?
+  aiGeneratedStatus String?      @default("NOT_AI_GENERATED")
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 }
+
 
 
 model ContributorItem {
