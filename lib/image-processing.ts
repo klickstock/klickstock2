@@ -356,6 +356,10 @@ async function getWatermarkTileBuffer(): Promise<Buffer> {
  */
 export async function generatePreviewWithWatermark(imageBuffer: Buffer): Promise<Buffer> {
   try {
+    // FIX 1: Get metadata, including the format, from the ORIGINAL buffer first.
+    const originalMetadata = await sharp(imageBuffer).metadata();
+    const originalFormat = originalMetadata.format;
+
     const resizedImage = await sharp(imageBuffer, {
       failOnError: false,
     })
@@ -376,44 +380,62 @@ export async function generatePreviewWithWatermark(imageBuffer: Buffer): Promise
     let watermarkCompositeOptions: sharp.OverlayOptions;
 
     if (width >= TILE_SIZE && height >= TILE_SIZE) {
-      // For large images, use the cached tile with tiling enabled.
       watermarkCompositeOptions = {
         input: await getWatermarkTileBuffer(),
         tile: true,
         blend: 'over',
       };
     } else {
-      // --- FIX 2: Refactored logic for small images ---
-      // For small images, we don't need to recreate the SVG.
-      // We'll take the same watermark tile and resize it to cover the entire small image.
-      // This creates a single, non-tiled watermark that is proportional.
       const singleWatermarkBuffer = await sharp(await getWatermarkTileBuffer())
-        .resize(width, height, { fit: 'cover' }) // Stretch the pattern to cover the small image
+        .resize(width, height, { fit: 'cover' })
         .png()
         .toBuffer();
 
       watermarkCompositeOptions = {
         input: singleWatermarkBuffer,
-        tile: false, // It's already resized to fit, so no tiling
+        tile: false,
         blend: 'over',
       };
     }
 
     // Step 4: Composite the watermark onto the resized image
-    const finalBuffer = await sharp(resizedImage)
-      .composite([watermarkCompositeOptions])
-      .jpeg({
-        quality: 90,
-        mozjpeg: true,
-        force: true,
-      })
-      .toBuffer();
+    const watermarkedImage = sharp(resizedImage)
+      .composite([watermarkCompositeOptions]);
+
+    // FIX 2: Conditionally set the output format based on the original.
+    let finalBuffer: Buffer;
+
+    // Use a switch to handle different formats and provide appropriate options.
+    switch (originalFormat) {
+      case 'png':
+        finalBuffer = await watermarkedImage
+          .png() // Preserve PNG format (and transparency)
+          .toBuffer();
+        break;
+
+      case 'webp':
+        finalBuffer = await watermarkedImage
+          .webp({ quality: 90 }) // Preserve WebP format
+          .toBuffer();
+        break;
+
+      case 'jpeg':
+      case 'jpg':
+      default:
+        // Default to JPEG for original JPEGs or any other unhandled format.
+        finalBuffer = await watermarkedImage
+          .jpeg({
+            quality: 90,
+            mozjpeg: true,
+          })
+          .toBuffer();
+        break;
+    }
 
     return finalBuffer;
 
   } catch (error: any) {
     console.error('Error generating preview with watermark:', error);
-    // The original error from sharp is more informative, so we re-throw it.
     throw new Error(`Failed to process image preview: ${error.message}`);
   }
 }
