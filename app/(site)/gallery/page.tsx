@@ -31,7 +31,7 @@ export default async function GalleryPage({
 }) {
   // Await the searchParams since they are now a Promise in Next.js 15
   const resolvedSearchParams = await searchParams;
-  
+
   // Use the search params directly since they are properly typed
   const searchQuery = resolvedSearchParams.q as string || "";
   const categoryFilter = resolvedSearchParams.category as string || "";
@@ -74,7 +74,7 @@ export default async function GalleryPage({
 
   // Build the orderBy clause
   let orderByClause: Prisma.ContributorItemOrderByWithRelationInput[] = [];
-  
+
   if (sortOption === "newest") {
     orderByClause = [{ createdAt: 'desc' }];
   } else if (sortOption === "downloads") {
@@ -112,26 +112,26 @@ export default async function GalleryPage({
   // Function to generate filter URL with updated params
   const getFilterUrl = (paramName: string, value: string) => {
     const params = new URLSearchParams();
-    
+
     if (normalizedSearchQuery) params.set('q', normalizedSearchQuery);
     if (categoryFilter && paramName !== 'category') params.set('category', categoryFilter);
     if (imageTypeFilter && paramName !== 'imageType') params.set('imageType', imageTypeFilter);
     if (aiGeneratedFilter && paramName !== 'aiGenerated') params.set('aiGenerated', aiGeneratedFilter);
     if (sortOption && paramName !== 'sort') params.set('sort', sortOption);
-    
+
     // Add or remove the selected filter
     if (paramName === 'category' && categoryFilter !== value) params.set('category', value);
     if (paramName === 'imageType' && imageTypeFilter !== value) params.set('imageType', value);
     if (paramName === 'aiGenerated' && aiGeneratedFilter !== value) params.set('aiGenerated', value);
     if (paramName === 'sort' && sortOption !== value) params.set('sort', value);
-    
+
     // Reset to page 1 when changing filters
     if (paramName !== 'page') {
       params.set('page', '1');
     } else if (value) {
       params.set('page', value);
     }
-    
+
     return `/gallery?${params.toString()}`;
   };
 
@@ -180,7 +180,7 @@ export default async function GalleryPage({
     aiStatus: AI_STATUS,
     activeFilters: {
       category: categoryFilter,
-      imageType: imageTypeFilter, 
+      imageType: imageTypeFilter,
       aiGenerated: aiGeneratedFilter
     },
     currentSearchQuery: normalizedSearchQuery,
@@ -190,30 +190,30 @@ export default async function GalleryPage({
   // Generate pagination range
   const generatePaginationRange = () => {
     const range: number[] = [];
-    
+
     // Always show first page
     range.push(1);
-    
+
     // Show ellipsis if needed
     if (currentPage > 3) {
       range.push(-1); // -1 represents ellipsis
     }
-    
+
     // Add pages around current page
     for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
       range.push(i);
     }
-    
+
     // Show ellipsis if needed
     if (currentPage < totalPages - 2) {
       range.push(-1); // -1 represents ellipsis
     }
-    
+
     // Always show last page if we have more than 1 page
     if (totalPages > 1) {
       range.push(totalPages);
     }
-    
+
     return range;
   };
 
@@ -223,7 +223,7 @@ export default async function GalleryPage({
     <div className="bg-black min-h-screen">
       {/* Full-width search bar */}
       <SearchBar />
-      
+
       <div className="border-b border-gray-800/50">
         {/* We're removing the filter pills from here */}
       </div>
@@ -239,7 +239,7 @@ export default async function GalleryPage({
       <div className="flex flex-col lg:flex-row relative">
         {/* Modified filter sidebar with mobile visibility handled by client component */}
         <div className="w-full lg:w-80 lg:sticky lg:top-0 lg:self-start flex-shrink-0 hidden lg:block" id="filter-sidebar-container">
-          <FilterSidebar 
+          <FilterSidebar
             filterData={filterData}
           />
         </div>
@@ -254,11 +254,10 @@ export default async function GalleryPage({
                 <Link
                   key={option.value}
                   href={getFilterUrl('sort', option.value)}
-                  className={`px-4 py-3 text-sm rounded-full transition-colors ${
-                    isFilterActive('sort', option.value)
+                  className={`px-4 py-3 text-sm rounded-full transition-colors ${isFilterActive('sort', option.value)
                       ? 'bg-indigo-600 text-white'
                       : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
                   {option.label}
                 </Link>
@@ -276,7 +275,7 @@ export default async function GalleryPage({
                     </Link>
                   </div>
                 )}
-                
+
                 {imageTypeFilter && (
                   <div className="text-gray-300 text-sm px-3 py-2.5 flex items-center gap-1 bg-gray-800/50 rounded-full">
                     <span>{IMAGE_TYPES.find(t => t.value === imageTypeFilter)?.label || imageTypeFilter}</span>
@@ -285,7 +284,7 @@ export default async function GalleryPage({
                     </Link>
                   </div>
                 )}
-                
+
                 {aiGeneratedFilter && (
                   <div className="text-gray-300 text-sm px-3 py-2.5 flex items-center gap-1 bg-gray-800/50 rounded-full">
                     <span>{AI_STATUS.find(s => s.value === aiGeneratedFilter)?.label || aiGeneratedFilter}</span>
@@ -294,8 +293,8 @@ export default async function GalleryPage({
                     </Link>
                   </div>
                 )}
-                
-                <Link 
+
+                <Link
                   href={getClearFilterUrl()}
                   className="text-sm text-gray-400 hover:text-indigo-300 px-3 py-2.5 transition-colors rounded-full bg-gray-800/50"
                 >
@@ -309,20 +308,20 @@ export default async function GalleryPage({
             <>
               <div className="columns-1 sm:columns-2 md:col-3 lg:columns-4 2xl:columns-5 gap-6 space-y-6">
                 {approvedItems.map((item: ItemWithUser) => (
-                  <Link 
-                    href={`/gallery/${item.id}`} 
+                  <Link
+                    href={`/gallery/${item.id}`}
                     key={item.id}
                     className="group block break-inside-avoid mb-6"
                   >
                     <div className="bg-gray-900/60 rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-gray-800/50 hover:border-indigo-500/50 relative">
                       <div className="relative w-full">
-                        <ImageWithPattern 
+                        <Image
                           src={item.imageUrl}
                           alt={item.title}
                           width={800}
                           height={800}
                           className="w-full transition-transform duration-500 group-hover:scale-110"
-                          imageType={getImageType(item)}
+                        // imageType={getImageType(item)}
                         />
                       </div>
                       {isAiGenerated(item) && (
@@ -354,20 +353,19 @@ export default async function GalleryPage({
                 <div className="mt-12 flex justify-center">
                   <nav className="flex items-center gap-1">
                     {/* Previous page button */}
-                    <Link 
+                    <Link
                       href={currentPage > 1 ? getPaginationUrl(currentPage - 1) : '#'}
-                      className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                        currentPage > 1 
-                          ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors' 
+                      className={`flex items-center justify-center w-10 h-10 rounded-full ${currentPage > 1
+                          ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors'
                           : 'text-gray-600 bg-gray-800/50 cursor-not-allowed'
-                      }`}
+                        }`}
                       aria-disabled={currentPage <= 1}
                     >
                       <ChevronLeft className="w-5 h-5" />
                     </Link>
-                    
+
                     {/* Page numbers */}
-                    {paginationRange.map((page, index) => 
+                    {paginationRange.map((page, index) =>
                       page === -1 ? (
                         // Ellipsis
                         <span key={`ellipsis-${index}`} className="w-10 h-10 flex items-center justify-center text-gray-400">
@@ -378,25 +376,23 @@ export default async function GalleryPage({
                         <Link
                           key={page}
                           href={getPaginationUrl(page)}
-                          className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
-                            currentPage === page
-                              ? 'bg-indigo-600 text-white' 
+                          className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${currentPage === page
+                              ? 'bg-indigo-600 text-white'
                               : 'text-gray-300 bg-gray-800 hover:bg-gray-700'
-                          }`}
+                            }`}
                         >
                           {page}
                         </Link>
                       )
                     )}
-                    
+
                     {/* Next page button */}
-                    <Link 
+                    <Link
                       href={currentPage < totalPages ? getPaginationUrl(currentPage + 1) : '#'}
-                      className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                        currentPage < totalPages 
-                          ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors' 
+                      className={`flex items-center justify-center w-10 h-10 rounded-full ${currentPage < totalPages
+                          ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors'
                           : 'text-gray-600 bg-gray-800/50 cursor-not-allowed'
-                      }`}
+                        }`}
                       aria-disabled={currentPage >= totalPages}
                     >
                       <ChevronRight className="w-5 h-5" />
@@ -417,11 +413,11 @@ export default async function GalleryPage({
               </div>
               <h3 className="text-2xl font-medium text-white mb-3">No images found</h3>
               <p className="text-gray-400 mb-8 max-w-md text-center">
-                {normalizedSearchQuery 
-                  ? `No results matching "${normalizedSearchQuery}"` 
+                {normalizedSearchQuery
+                  ? `No results matching "${normalizedSearchQuery}"`
                   : "No images matching the selected filters"}
               </p>
-              <Link 
+              <Link
                 href={getClearFilterUrl()}
                 className="px-6 py-3 bg-indigo-600 text-white rounded-full font-medium hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-500/20"
               >
