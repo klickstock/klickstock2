@@ -73,7 +73,7 @@ export default async function PngsPage({
 
   // Build the orderBy clause
   let orderByClause: Prisma.ContributorItemOrderByWithRelationInput[] = [];
-  
+
   if (sortOption === "newest") {
     orderByClause = [{ createdAt: 'desc' }];
   } else if (sortOption === "downloads") {
@@ -111,24 +111,24 @@ export default async function PngsPage({
   // Function to generate filter URL with updated params
   const getFilterUrl = (paramName: string, value: string) => {
     const params = new URLSearchParams();
-    
+
     if (searchQuery) params.set('q', searchQuery);
     if (categoryFilter && paramName !== 'category') params.set('category', categoryFilter);
     if (aiGeneratedFilter && paramName !== 'aiGenerated') params.set('aiGenerated', aiGeneratedFilter);
     if (sortOption && paramName !== 'sort') params.set('sort', sortOption);
-    
+
     // Add or remove the selected filter
     if (paramName === 'category' && categoryFilter !== value) params.set('category', value);
     if (paramName === 'aiGenerated' && aiGeneratedFilter !== value) params.set('aiGenerated', value);
     if (paramName === 'sort' && sortOption !== value) params.set('sort', value);
-    
+
     // Reset to page 1 when changing filters
     if (paramName !== 'page') {
       params.set('page', '1');
     } else if (value) {
       params.set('page', value);
     }
-    
+
     return `/pngs?${params.toString()}`;
   };
 
@@ -186,30 +186,30 @@ export default async function PngsPage({
   // Generate pagination range
   const generatePaginationRange = () => {
     const range: number[] = [];
-    
+
     // Always show first page
     range.push(1);
-    
+
     // Show ellipsis if needed
     if (currentPage > 3) {
       range.push(-1); // -1 represents ellipsis
     }
-    
+
     // Add pages around current page
     for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
       range.push(i);
     }
-    
+
     // Show ellipsis if needed
     if (currentPage < totalPages - 2) {
       range.push(-1); // -1 represents ellipsis
     }
-    
+
     // Always show last page if we have more than 1 page
     if (totalPages > 1) {
       range.push(totalPages);
     }
-    
+
     return range;
   };
 
@@ -217,11 +217,11 @@ export default async function PngsPage({
 
   return (
     <div className="bg-black min-h-screen">
-      
-      
+
+
       {/* Full-width search bar */}
       <SearchBar />
-      
+
       <div className="border-b border-gray-800/50">
         {/* We're removing the filter pills from here */}
       </div>
@@ -229,7 +229,7 @@ export default async function PngsPage({
       <div className="flex flex-col lg:flex-row relative">
         {/* Modern collapsible filters sidebar - sticky with no gap */}
         <div className="w-full lg:w-80 lg:sticky lg:top-0 lg:self-start flex-shrink-0">
-          <FilterSidebar 
+          <FilterSidebar
             filterData={filterData}
           />
         </div>
@@ -244,11 +244,10 @@ export default async function PngsPage({
                 <Link
                   key={option.value}
                   href={getFilterUrl('sort', option.value)}
-                  className={`px-4 py-3 text-sm rounded-full transition-colors ${
-                    isFilterActive('sort', option.value)
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-gray-900/80 border border-gray-800 text-gray-400 hover:bg-gray-800 hover:text-gray-300'
-                  }`}
+                  className={`px-4 py-3 text-sm rounded-full transition-colors ${isFilterActive('sort', option.value)
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-900/80 border border-gray-800 text-gray-400 hover:bg-gray-800 hover:text-gray-300'
+                    }`}
                 >
                   {option.label}
                 </Link>
@@ -273,21 +272,20 @@ export default async function PngsPage({
           ) : (
             <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
               {approvedItems.map((item) => (
-                <Link 
-                  href={`/gallery/${item.id}`} 
+                <Link
+                  href={`/gallery/${item.id}`}
                   key={item.id}
                   className="group block break-inside-avoid"
                 >
                   <div className="bg-gray-900/30 rounded-xl overflow-hidden border border-gray-800/50 hover:border-indigo-500/40 transition-all duration-200 relative">
                     <div className="relative w-full">
                       <div className="absolute inset-0 bg-[url('/transparent-checkerboard.svg')] bg-repeat bg-[length:20px_20px] opacity-10"></div>
-                      <ImageWithPattern 
+                      <Image
                         src={item.imageUrl}
                         alt={item.title}
                         width={800}
                         height={800}
                         className="w-full transition-transform duration-500 group-hover:scale-105"
-                        imageType="PNG"
                       />
                     </div>
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
@@ -309,7 +307,7 @@ export default async function PngsPage({
               ))}
             </div>
           )}
-          
+
           {/* Pagination */}
           {paginationRange.length > 0 && (
             <div className="flex justify-center mt-12 mb-6">
@@ -317,19 +315,18 @@ export default async function PngsPage({
                 {/* Previous page button */}
                 <Link
                   href={currentPage > 1 ? getPaginationUrl(currentPage - 1) : '#'}
-                  className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                    currentPage > 1 
-                      ? 'bg-gray-900 border border-gray-800 hover:border-gray-700 text-gray-400 hover:text-gray-300'
-                      : 'bg-gray-900/40 border border-gray-800/50 text-gray-700 cursor-not-allowed'
-                  }`}
+                  className={`flex items-center justify-center w-10 h-10 rounded-full ${currentPage > 1
+                    ? 'bg-gray-900 border border-gray-800 hover:border-gray-700 text-gray-400 hover:text-gray-300'
+                    : 'bg-gray-900/40 border border-gray-800/50 text-gray-700 cursor-not-allowed'
+                    }`}
                   aria-disabled={currentPage <= 1}
                   tabIndex={currentPage <= 1 ? -1 : undefined}
                 >
                   <ChevronDown className="w-4 h-4 rotate-90" />
                 </Link>
-                
+
                 {/* Page numbers */}
-                {paginationRange.map((page, i) => 
+                {paginationRange.map((page, i) =>
                   page === -1 ? (
                     // Ellipsis
                     <span key={`ellipsis-${i}`} className="flex items-center justify-center w-10 h-10 text-gray-600">
@@ -340,25 +337,23 @@ export default async function PngsPage({
                     <Link
                       key={page}
                       href={getPaginationUrl(page)}
-                      className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                        currentPage === page
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-gray-900 border border-gray-800 hover:border-gray-700 text-gray-400 hover:text-gray-300'
-                      }`}
+                      className={`flex items-center justify-center w-10 h-10 rounded-full ${currentPage === page
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-900 border border-gray-800 hover:border-gray-700 text-gray-400 hover:text-gray-300'
+                        }`}
                     >
                       {page}
                     </Link>
                   )
                 )}
-                
+
                 {/* Next page button */}
                 <Link
                   href={currentPage < totalPages ? getPaginationUrl(currentPage + 1) : '#'}
-                  className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                    currentPage < totalPages 
-                      ? 'bg-gray-900 border border-gray-800 hover:border-gray-700 text-gray-400 hover:text-gray-300'
-                      : 'bg-gray-900/40 border border-gray-800/50 text-gray-700 cursor-not-allowed'
-                  }`}
+                  className={`flex items-center justify-center w-10 h-10 rounded-full ${currentPage < totalPages
+                    ? 'bg-gray-900 border border-gray-800 hover:border-gray-700 text-gray-400 hover:text-gray-300'
+                    : 'bg-gray-900/40 border border-gray-800/50 text-gray-700 cursor-not-allowed'
+                    }`}
                   aria-disabled={currentPage >= totalPages}
                   tabIndex={currentPage >= totalPages ? -1 : undefined}
                 >
