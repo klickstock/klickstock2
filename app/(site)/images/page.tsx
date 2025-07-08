@@ -279,13 +279,13 @@ export default async function ImagesPage({
                 >
                   <div className="bg-gray-900/30 rounded-xl overflow-hidden border border-gray-800/50 hover:border-indigo-500/40 transition-all duration-200 relative">
                     <div className="relative w-full">
-                      <Image
+                      <ImageWithPattern
                         src={item.imageUrl}
                         alt={item.title}
                         width={800}
                         height={800}
                         className="w-full transition-transform duration-500 group-hover:scale-105"
-                      // imageType={getImageType(item)}
+                        imageType={getImageType(item)}
                       />
                     </div>
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">

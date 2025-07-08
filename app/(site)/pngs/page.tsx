@@ -280,7 +280,7 @@ export default async function PngsPage({
                   <div className="bg-gray-900/30 rounded-xl overflow-hidden border border-gray-800/50 hover:border-indigo-500/40 transition-all duration-200 relative">
                     <div className="relative w-full">
                       <div className="absolute inset-0 bg-[url('/transparent-checkerboard.svg')] bg-repeat bg-[length:20px_20px] opacity-10"></div>
-                      <Image
+                      <ImageWithPattern
                         src={item.imageUrl}
                         alt={item.title}
                         width={800}

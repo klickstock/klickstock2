@@ -255,8 +255,8 @@ export default async function GalleryPage({
                   key={option.value}
                   href={getFilterUrl('sort', option.value)}
                   className={`px-4 py-3 text-sm rounded-full transition-colors ${isFilterActive('sort', option.value)
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                     }`}
                 >
                   {option.label}
@@ -315,13 +315,13 @@ export default async function GalleryPage({
                   >
                     <div className="bg-gray-900/60 rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-gray-800/50 hover:border-indigo-500/50 relative">
                       <div className="relative w-full">
-                        <Image
+                        <ImageWithPattern
                           src={item.imageUrl}
                           alt={item.title}
                           width={800}
                           height={800}
                           className="w-full transition-transform duration-500 group-hover:scale-110"
-                        // imageType={getImageType(item)}
+                          imageType={getImageType(item)}
                         />
                       </div>
                       {isAiGenerated(item) && (
@@ -356,8 +356,8 @@ export default async function GalleryPage({
                     <Link
                       href={currentPage > 1 ? getPaginationUrl(currentPage - 1) : '#'}
                       className={`flex items-center justify-center w-10 h-10 rounded-full ${currentPage > 1
-                          ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors'
-                          : 'text-gray-600 bg-gray-800/50 cursor-not-allowed'
+                        ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors'
+                        : 'text-gray-600 bg-gray-800/50 cursor-not-allowed'
                         }`}
                       aria-disabled={currentPage <= 1}
                     >
@@ -377,8 +377,8 @@ export default async function GalleryPage({
                           key={page}
                           href={getPaginationUrl(page)}
                           className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${currentPage === page
-                              ? 'bg-indigo-600 text-white'
-                              : 'text-gray-300 bg-gray-800 hover:bg-gray-700'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-gray-300 bg-gray-800 hover:bg-gray-700'
                             }`}
                         >
                           {page}
@@ -390,8 +390,8 @@ export default async function GalleryPage({
                     <Link
                       href={currentPage < totalPages ? getPaginationUrl(currentPage + 1) : '#'}
                       className={`flex items-center justify-center w-10 h-10 rounded-full ${currentPage < totalPages
-                          ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors'
-                          : 'text-gray-600 bg-gray-800/50 cursor-not-allowed'
+                        ? 'text-white bg-gray-800 hover:bg-indigo-600 transition-colors'
+                        : 'text-gray-600 bg-gray-800/50 cursor-not-allowed'
                         }`}
                       aria-disabled={currentPage >= totalPages}
                     >
