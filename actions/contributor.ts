@@ -296,79 +296,80 @@ export async function deleteInitialUpload(id: string): Promise<{ success: boolea
 
 /**
  * Creates ContributorItem records from submitted initial uploads.
- * REFACTORED for robustness. The transactional loop is correct here, but we can make it safer.
+ * REFACTORED to use a transaction-per-item model for scalability and resilience.
  */
 export async function createContributorItemsFromUploads(itemsToSubmit: Omit<UploadFile, 'previewUrl' | 'originalFileName'>[], saveAsDraft: boolean) {
   const session = await auth();
-  if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
-  if (!itemsToSubmit || itemsToSubmit.length === 0) {
-    return { success: true, count: 0 };
-  }
+  if (!session?.user?.id) throw new Error("Not authenticated.");
+  if (!itemsToSubmit || itemsToSubmit.length === 0) return { success: true, count: 0 };
 
   const userId = session.user.id;
+  let successfulCount = 0;
 
-  // REASON: The loop inside a transaction is the correct Prisma pattern when you need the ID
-  // of a newly created record (`newContributorItem.id`) to perform a subsequent update.
-  // A bulk `createMany` does not return the created IDs.
-  const results = await db.$transaction(async (tx) => {
-    // 1. Fetch all valid initial uploads in one go to reduce database round-trips.
-    const itemIds = itemsToSubmit.map(item => item.id);
-    const initialUploads = await tx.initialUpload.findMany({
-      where: {
-        id: { in: itemIds },
-        userId,
-        contributorItemId: null // Only process unsubmitted items
-      },
-    });
-    const validUploadsMap = new Map(initialUploads.map(up => [up.id, up]));
-
-
-    const createdItems = [];
-    for (const item of itemsToSubmit) {
-      const initialUpload = validUploadsMap.get(item.id);
-
-      if (!initialUpload) {
-        console.warn(`Skipping item ${item.id}: Not found, already submitted, or permission denied.`);
-        continue;
-      }
-
-      // 2. Construct full S3 URLs (add checks for env variables)
-      const bucket = process.env.AWS_BUCKET_NAME;
-      const region = process.env.AWS_REGION;
-      if (!bucket || !region) {
-        throw new Error("AWS bucket name or region is not configured in environment variables.");
-      }
-      const imageUrl = `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.s3Key}`;
-      const previewUrl = `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.previewS3Key}`;
-
-      // 3. Create the ContributorItem
-      const newContributorItem = await tx.contributorItem.create({
-        data: {
-          title: item.title, description: item.description, tags: item.tags,
-          category: item.category,
-          license: item.license === 'EXTENDED' ? 'EXTENDED' : 'STANDARD',
-          imageType: item.imageType, aiGeneratedStatus: item.aiGeneratedStatus,
-          status: saveAsDraft ? ContributorItemStatus.DRAFT : ContributorItemStatus.PENDING,
-          userId, imageUrl, previewUrl,
-        }
-      });
-
-      // 4. Link the InitialUpload to the new ContributorItem
-      await tx.initialUpload.update({
-        where: { id: initialUpload.id },
-        data: { contributorItemId: newContributorItem.id },
-      });
-
-      createdItems.push(newContributorItem);
-    }
-    return createdItems;
+  // 1. Fetch all valid initial uploads in one go (Your excellent optimization)
+  const itemIds = itemsToSubmit.map(item => item.id);
+  const initialUploads = await db.initialUpload.findMany({
+    where: { id: { in: itemIds }, userId, contributorItemId: null },
   });
+  const validUploadsMap = new Map(initialUploads.map(up => [up.id, up]));
 
-  revalidatePath('/contributor/upload');
-  revalidatePath('/contributor/drafts');
-  revalidatePath('/contributor/under-review');
+  // --- THIS IS THE KEY CHANGE ---
+  // We loop through each item and give it its own transaction.
+  for (const item of itemsToSubmit) {
+    const initialUpload = validUploadsMap.get(item.id);
 
-  return { success: true, count: results.length };
+    // Skip if the upload isn't valid (already submitted, not found, etc.)
+    if (!initialUpload) {
+      console.warn(`Skipping item ${item.id}: Not found, already submitted, or permission denied.`);
+      continue;
+    }
+
+    try {
+      // 2. Start a small, fast transaction for just this single item.
+      await db.$transaction(async (tx) => {
+        const bucket = process.env.AWS_BUCKET_NAME!;
+        const region = process.env.AWS_REGION!;
+
+        // 3. Create the ContributorItem
+        const newContributorItem = await tx.contributorItem.create({
+          data: {
+            title: item.title, description: item.description, tags: item.tags,
+            category: item.category,
+            license: item.license === 'EXTENDED' ? 'EXTENDED' : 'STANDARD',
+            imageType: item.imageType, aiGeneratedStatus: item.aiGeneratedStatus,
+            status: saveAsDraft ? ContributorItemStatus.DRAFT : ContributorItemStatus.PENDING,
+            userId,
+            imageUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.s3Key}`,
+            previewUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.previewS3Key}`,
+          }
+        });
+
+        // 4. Link the InitialUpload to the new ContributorItem.
+        // This prevents it from being submitted again.
+        await tx.initialUpload.update({
+          where: { id: initialUpload.id },
+          data: { contributorItemId: newContributorItem.id },
+        });
+      });
+
+      // 5. If the transaction succeeds, increment our counter.
+      successfulCount++;
+
+    } catch (error) {
+      // 6. If this specific item fails, log the error and continue to the next one.
+      console.error(`Failed to process and submit item ${item.id} (${item.title}). Error:`, error);
+      // The overall process does not stop.
+    }
+  }
+
+  // 7. Revalidate paths and return the count of successfully processed items.
+  if (successfulCount > 0) {
+    revalidatePath('/contributor/upload');
+    revalidatePath('/contributor/drafts');
+    revalidatePath('/contributor/under-review');
+  }
+
+  return { success: true, count: successfulCount };
 }
 
 // ===================================================================
