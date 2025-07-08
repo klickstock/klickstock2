@@ -7,7 +7,7 @@ import {
   Sparkles,
   Trash2
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "react-hot-toast"; // <--- CHANGED: Switched to react-hot-toast
 import { Button } from "@/components/ui/button";
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
@@ -61,6 +61,7 @@ export function UploadSidebar({
   setActiveFileIndex,
   newTag,
   setNewTag,
+  // handleAddTag and handleRemoveTag are no longer used directly, but the props are kept for potential future use if logic changes
   handleRemoveFile,
   selectedFiles,
   isGenerating,
@@ -83,6 +84,7 @@ export function UploadSidebar({
   const isBulkEditing = selectedFiles.length > 1;
 
   const handleFieldChange = (data: Partial<UploadFile>) => {
+    // This function correctly applies changes to ALL selected files if in bulk mode
     if (isBulkEditing) {
       dispatch(updateMultipleFiles({ indices: selectedFiles, data }));
     } else {
@@ -90,33 +92,19 @@ export function UploadSidebar({
     }
   };
 
-  const getSharedValue = <K extends keyof UploadFile>(key: K): UploadFile[K] | undefined => {
-    const firstValue = files[selectedFiles[0]][key];
-    const allSame = selectedFiles.every(index => files[index][key] === firstValue);
-    return allSame ? firstValue : undefined;
-  };
-
-  const sharedValues = {
-    title: isBulkEditing ? getSharedValue('title') : activeFile.title,
-    description: isBulkEditing ? getSharedValue('description') : activeFile.description,
-    category: isBulkEditing ? getSharedValue('category') : activeFile.category,
-    license: isBulkEditing ? getSharedValue('license') : activeFile.license,
-    imageType: isBulkEditing ? getSharedValue('imageType') : activeFile.imageType,
-    aiGeneratedStatus: isBulkEditing ? getSharedValue('aiGeneratedStatus') : activeFile.aiGeneratedStatus,
-  };
 
   const filesBeingEdited = selectedFiles.map(index => files[index]);
   const canSubmitSelectionForReview = filesBeingEdited.length > 0 && filesBeingEdited.every(isFileComplete);
 
-  const allSelectedTags = isBulkEditing
-    ? [...new Set(selectedFiles.flatMap(index => files[index].tags || []))]
-    : activeFile.tags;
+  // --- CHANGED: Display tags only from the active file ---
+  const tagsToDisplay = activeFile.tags || [];
 
   const handleAddTags = () => {
     if (!newTag.trim()) return;
     const tagsToAdd = newTag.split(',').map(tag => tag.trim()).filter(Boolean);
     if (tagsToAdd.length === 0) return;
 
+    // This logic correctly applies new tags to ALL selected files
     const indicesToUpdate = isBulkEditing ? selectedFiles : [activeFileIndex];
     indicesToUpdate.forEach(index => {
       const file = files[index];
@@ -124,7 +112,7 @@ export function UploadSidebar({
       const combined = [...new Set([...currentTags, ...tagsToAdd])];
       const finalTags = combined.slice(0, 50);
       if (combined.length > 50) {
-        toast.warning(`Keyword limit reached for ${file.originalFileName}. Some tags were not added.`);
+        toast.error(`Keyword limit reached for ${file.originalFileName}. Some tags were not added.`);
       }
       dispatch(updateFile({ index, data: { tags: finalTags } }));
     });
@@ -132,6 +120,7 @@ export function UploadSidebar({
   };
 
   const handleRemoveTagFromSelection = (tagToRemove: string) => {
+    // This logic correctly removes a tag from ALL selected files
     const indicesToUpdate = isBulkEditing ? selectedFiles : [activeFileIndex];
     indicesToUpdate.forEach(index => {
       const file = files[index];
@@ -149,7 +138,7 @@ export function UploadSidebar({
         <button
           type="button"
           onClick={() => {
-            if (confirm("Are you sure you want to permanently delete this image?")) {
+            if (confirm(`Are you sure you want to permanently delete the image "${activeFile.originalFileName}"?`)) {
               handleRemoveFile(activeFileIndex);
             }
           }}
@@ -213,12 +202,14 @@ export function UploadSidebar({
           <div>
             <Label htmlFor="sidebar-title" className="text-gray-300 flex items-center">
               Title <span className="text-red-400 ml-1">*</span>
+              {isBulkEditing && <Badge variant="secondary" className="ml-2">Editing {selectedFiles.length}</Badge>}
             </Label>
+            {/* --- CHANGED: Value now comes directly from activeFile --- */}
             <Input
               id="sidebar-title"
-              value={sharedValues.title ?? ''}
+              value={activeFile.title || ''}
               onChange={(e) => handleFieldChange({ title: e.target.value })}
-              placeholder={isBulkEditing && sharedValues.title === undefined ? 'Multiple values' : 'Enter image title'}
+              placeholder="Enter image title"
               required
               className="mt-1 bg-gray-800 border-gray-700 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500"
             />
@@ -226,11 +217,12 @@ export function UploadSidebar({
 
           <div>
             <Label htmlFor="sidebar-description" className="text-gray-300">Description</Label>
+            {/* --- CHANGED: Value now comes directly from activeFile --- */}
             <Textarea
               id="sidebar-description"
-              value={sharedValues.description ?? ''}
+              value={activeFile.description || ''}
               onChange={(e) => handleFieldChange({ description: e.target.value })}
-              placeholder={isBulkEditing && sharedValues.description === undefined ? 'Multiple values' : 'Describe your image'}
+              placeholder="Describe your image"
               rows={2}
               className="mt-1 bg-gray-800 border-gray-700 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500"
             />
@@ -239,12 +231,13 @@ export function UploadSidebar({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="sidebar-category">Category <span className="text-red-400 ml-1">*</span></Label>
+              {/* --- CHANGED: Value now comes directly from activeFile --- */}
               <Select
-                value={sharedValues.category ?? ''}
+                value={activeFile.category || ''}
                 onValueChange={(value) => handleFieldChange({ category: value })}
               >
                 <SelectTrigger id="sidebar-category" className="mt-1 bg-gray-800 border-gray-700 text-gray-200">
-                  <SelectValue placeholder={isBulkEditing && sharedValues.category === undefined ? 'Multiple values' : 'Select category'} />
+                  <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
                   {CATEGORY_OPTIONS.map((cat) => <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>)}
@@ -253,12 +246,13 @@ export function UploadSidebar({
             </div>
             <div>
               <Label htmlFor="sidebar-license">License</Label>
+              {/* --- CHANGED: Value now comes directly from activeFile --- */}
               <Select
-                value={sharedValues.license ?? ''}
+                value={activeFile.license || ''}
                 onValueChange={(value) => handleFieldChange({ license: value })}
               >
                 <SelectTrigger id="sidebar-license" className="mt-1 bg-gray-800 border-gray-700 text-gray-200">
-                  <SelectValue placeholder={isBulkEditing && sharedValues.license === undefined ? 'Multiple values' : 'Select license'} />
+                  <SelectValue placeholder="Select license" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
                   {LICENSE_OPTIONS.map((lic) => <SelectItem key={lic.value} value={lic.value}>{lic.label}</SelectItem>)}
@@ -270,12 +264,13 @@ export function UploadSidebar({
           <div className="grid grid-cols-2 gap-4 items-center">
             <div>
               <Label htmlFor="sidebar-image-type">Image Type <span className="text-red-400 ml-1">*</span></Label>
+              {/* --- CHANGED: Value now comes directly from activeFile --- */}
               <Select
-                value={sharedValues.imageType ?? ''}
+                value={activeFile.imageType || ''}
                 onValueChange={(value) => handleFieldChange({ imageType: value })}
               >
                 <SelectTrigger id="sidebar-image-type" className="mt-1 bg-gray-800 border-gray-700 text-gray-200">
-                  <SelectValue placeholder={isBulkEditing && sharedValues.imageType === undefined ? 'Multiple values' : 'Select type'} />
+                  <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border border-gray-700 text-gray-200">
                   {IMAGE_TYPE_OPTIONS.map((type) => <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>)}
@@ -286,13 +281,14 @@ export function UploadSidebar({
             <div>
               <Label htmlFor="sidebar-ai-status" className="mb-2">AI Generated <span className="text-red-400 ml-1">*</span></Label>
               <div className="flex items-center gap-2">
+                {/* --- CHANGED: Checked state now comes directly from activeFile --- */}
                 <Switch
                   id="sidebar-ai-status"
-                  checked={sharedValues.aiGeneratedStatus === "AI_GENERATED"}
+                  checked={activeFile.aiGeneratedStatus === "AI_GENERATED"}
                   onCheckedChange={(checked) => handleFieldChange({ aiGeneratedStatus: checked ? "AI_GENERATED" : "NOT_AI_GENERATED" })}
                 />
                 <span className="text-sm text-gray-400">
-                  {sharedValues.aiGeneratedStatus === "AI_GENERATED" ? "Yes" : sharedValues.aiGeneratedStatus === "NOT_AI_GENERATED" ? "No" : "Mixed"}
+                  {activeFile.aiGeneratedStatus === "AI_GENERATED" ? "Yes" : "No"}
                 </span>
               </div>
             </div>
@@ -301,7 +297,8 @@ export function UploadSidebar({
           <div>
             <Label>Keywords <span className="text-red-400 ml-1">*</span></Label>
             <div className="flex flex-wrap gap-2 mt-2 min-h-[40px] p-2 border rounded-md border-gray-700 bg-gray-900">
-              {allSelectedTags.map((tag: string, tagIndex: number) => (
+              {/* --- CHANGED: Now iterates over tagsToDisplay (from active file) --- */}
+              {tagsToDisplay.map((tag: string, tagIndex: number) => (
                 <Badge key={`${tag}-${tagIndex}`} className="gap-1 bg-indigo-900/60 text-indigo-300">
                   {tag}
                   <button type="button" onClick={() => handleRemoveTagFromSelection(tag)} className="ml-1 text-indigo-300 hover:text-indigo-100">
