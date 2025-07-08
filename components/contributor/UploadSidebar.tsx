@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { updateFile, updateMultipleFiles } from "@/redux/features/uploadSlice"; // Import the new action
+import { updateFile, updateMultipleFiles } from "@/redux/features/uploadSlice";
 import { UploadFile } from "@/redux/features/uploadSlice";
 import {
   categoryOptions,
@@ -40,7 +40,6 @@ type UploadSidebarProps = {
   setActiveFileIndex: (index: number | null) => void;
   newTag: string;
   setNewTag: (tag: string) => void;
-  // handleAddTag and handleRemoveTag will be redefined inside
   handleAddTag: (index: number) => void;
   handleRemoveTag: (fileIndex: number, tagIndex: number) => void;
   handleRemoveFile: (index: number) => void;
@@ -51,7 +50,8 @@ type UploadSidebarProps = {
   generateContentWithAIForAll?: () => void;
   isUploading: boolean;
   transparentImages: { [key: string]: boolean | null };
-  handleSubmitAll: (saveDraft: boolean) => void;
+  handleSubmitAll: () => void;
+  handleSaveProgress: () => void;
   isFileComplete: (file: UploadFile) => boolean;
 };
 
@@ -61,7 +61,6 @@ export function UploadSidebar({
   setActiveFileIndex,
   newTag,
   setNewTag,
-  // handleAddTag and handleRemoveTag are passed but we will use our own bulk-aware versions
   handleRemoveFile,
   selectedFiles,
   isGenerating,
@@ -71,6 +70,7 @@ export function UploadSidebar({
   isUploading,
   transparentImages,
   handleSubmitAll,
+  handleSaveProgress,
   isFileComplete
 }: UploadSidebarProps) {
   const dispatch = useDispatch();
@@ -82,9 +82,6 @@ export function UploadSidebar({
   const activeFile = files[activeFileIndex];
   const isBulkEditing = selectedFiles.length > 1;
 
-  // --- START OF FIX ---
-
-  // 1. Generic handler to update one or many files
   const handleFieldChange = (data: Partial<UploadFile>) => {
     if (isBulkEditing) {
       dispatch(updateMultipleFiles({ indices: selectedFiles, data }));
@@ -93,14 +90,12 @@ export function UploadSidebar({
     }
   };
 
-  // 2. Function to get a shared value from all selected files
   const getSharedValue = <K extends keyof UploadFile>(key: K): UploadFile[K] | undefined => {
     const firstValue = files[selectedFiles[0]][key];
     const allSame = selectedFiles.every(index => files[index][key] === firstValue);
     return allSame ? firstValue : undefined;
   };
 
-  // 3. Define shared values for form inputs. If values are different, they will be undefined.
   const sharedValues = {
     title: isBulkEditing ? getSharedValue('title') : activeFile.title,
     description: isBulkEditing ? getSharedValue('description') : activeFile.description,
@@ -110,13 +105,9 @@ export function UploadSidebar({
     aiGeneratedStatus: isBulkEditing ? getSharedValue('aiGeneratedStatus') : activeFile.aiGeneratedStatus,
   };
 
-  // 4. Recalculate submit button states based on ALL selected files
   const filesBeingEdited = selectedFiles.map(index => files[index]);
-  const isFileDraftable = (file: UploadFile) => Boolean(file.title?.trim());
-  const canSaveSelectionAsDraft = filesBeingEdited.length > 0 && filesBeingEdited.every(isFileDraftable);
   const canSubmitSelectionForReview = filesBeingEdited.length > 0 && filesBeingEdited.every(isFileComplete);
 
-  // 5. Bulk-aware tag handling
   const allSelectedTags = isBulkEditing
     ? [...new Set(selectedFiles.flatMap(index => files[index].tags || []))]
     : activeFile.tags;
@@ -131,7 +122,7 @@ export function UploadSidebar({
       const file = files[index];
       const currentTags = file.tags || [];
       const combined = [...new Set([...currentTags, ...tagsToAdd])];
-      const finalTags = combined.slice(0, 50); // Enforce 50 tag limit
+      const finalTags = combined.slice(0, 50);
       if (combined.length > 50) {
         toast.warning(`Keyword limit reached for ${file.originalFileName}. Some tags were not added.`);
       }
@@ -149,11 +140,8 @@ export function UploadSidebar({
     });
   };
 
-  // --- END OF FIX ---
-
   return (
     <div className="absolute top-0 right-0 bottom-0 w-[400px] bg-gray-950 border-l border-gray-800/50 overflow-hidden z-50 flex flex-col h-screen shadow-xl max-h-full">
-      {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-800/50">
         <h3 className="text-lg font-medium text-white">
           {isBulkEditing ? `Edit ${selectedFiles.length} Images` : "Edit Image Details"}
@@ -172,9 +160,7 @@ export function UploadSidebar({
         </button>
       </div>
 
-      {/* Scrollable content area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Image preview and AI button section */}
         <div className="p-4 bg-gray-900/30 border-b border-gray-800/50">
           <div className="relative h-48 rounded-lg overflow-hidden bg-gray-900 group border border-gray-700/50">
             {activeFile.imageType === "PNG" && transparentImages[activeFile.id] && (
@@ -223,7 +209,6 @@ export function UploadSidebar({
           )}
         </div>
 
-        {/* Form fields - scrollable */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
           <div>
             <Label htmlFor="sidebar-title" className="text-gray-300 flex items-center">
@@ -345,20 +330,19 @@ export function UploadSidebar({
           </div>
         </div>
 
-        {/* Submit buttons - fixed at bottom */}
         <div className="p-4 bg-gray-950 border-t border-gray-800/50 flex gap-3">
           <Button
             type="button"
-            onClick={() => handleSubmitAll(true)}
-            disabled={isUploading || !canSaveSelectionAsDraft}
-            title={!canSaveSelectionAsDraft ? "All selected images must have a title to be saved." : "Save selected images as drafts"}
+            onClick={handleSaveProgress}
+            disabled={isUploading || selectedFiles.length === 0}
+            title="Save your editing progress to your browser's local storage."
             className="flex-1 border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300"
           >
-            Save as Draft
+            Save Progress
           </Button>
           <Button
             type="button"
-            onClick={() => handleSubmitAll(false)}
+            onClick={handleSubmitAll}
             disabled={isUploading || !canSubmitSelectionForReview}
             title={!canSubmitSelectionForReview ? "All selected images must have all required fields completed." : "Submit selected images for review"}
             className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white"

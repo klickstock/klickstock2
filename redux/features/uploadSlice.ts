@@ -2,11 +2,13 @@
 
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
-// This interface now represents an ALREADY uploaded file waiting for metadata.
+// NEW: Add status and progress to the file interface
 export interface UploadFile {
-  id: string; // This is the ID from the InitialUpload model
-  previewUrl: string; // This will be a signed URL from S3
+  // --- Core initial upload data ---
+  id: string;
+  previewUrl: string;
   originalFileName: string;
+  // --- Metadata for submission ---
   title: string;
   description: string;
   tags: string[];
@@ -14,11 +16,17 @@ export interface UploadFile {
   category: string;
   imageType: string;
   aiGeneratedStatus: string;
+  // --- NEW: Fields for tracking upload state ---
+  // A temporary ID used during the upload process before a DB id is available
+  tempId?: string;
+  status?: 'uploading' | 'processing' | 'failed' | 'complete';
+  progress?: number; // Progress from 0 to 100
+  error?: string | null; // Error message for a specific file
 }
 
 interface UploadState {
   files: UploadFile[];
-  isUploading: boolean; // Will now be true during the initial file transfer
+  isUploading: boolean; // This will represent the overall state
   error: string | null;
   success: string | null;
 }
@@ -34,38 +42,43 @@ export const uploadSlice = createSlice({
   name: 'upload',
   initialState,
   reducers: {
+    // NEW: Adds files to the queue before upload starts
+    addFilesToQueue: (state, action: PayloadAction<UploadFile[]>) => {
+      state.files.unshift(...action.payload);
+      state.isUploading = true;
+    },
+    // NEW: Updates a file's progress and status using a temporary ID
+    updateFileUploadState: (state, action: PayloadAction<{ tempId: string, data: Partial<UploadFile> }>) => {
+      const { tempId, data } = action.payload;
+      const fileIndex = state.files.findIndex(f => f.tempId === tempId);
+      if (fileIndex !== -1) {
+        state.files[fileIndex] = { ...state.files[fileIndex], ...data };
+      }
+    },
     // Replaces the entire file list, useful after fetching from server
     setFiles: (state, action: PayloadAction<UploadFile[]>) => {
-      state.files = action.payload;
+      // Add 'complete' status to fetched files
+      state.files = action.payload.map(f => ({ ...f, status: 'complete' }));
     },
-    // Updates a specific file's metadata
+    // Updates a specific file's metadata by its DB id
     updateFile: (state, action: PayloadAction<{ index: number, data: Partial<UploadFile> }>) => {
       const { index, data } = action.payload;
       if (index >= 0 && index < state.files.length) {
         state.files[index] = { ...state.files[index], ...data };
       }
     },
-    // --- START OF FIX ---
-    // New reducer to update multiple files at once.
     updateMultipleFiles: (state, action: PayloadAction<{ indices: number[], data: Partial<UploadFile> }>) => {
       const { indices, data } = action.payload;
       indices.forEach(index => {
         if (index >= 0 && index < state.files.length) {
-          // For tags, we need to merge instead of replace, unless a full new array is provided
-          if (data.tags && !Array.isArray(data.tags)) {
-            // This logic is better handled in the component, here we just update
-          } else {
-            state.files[index] = { ...state.files[index], ...data };
-          }
+          state.files[index] = { ...state.files[index], ...data };
         }
       });
     },
-    // --- END OF FIX ---
-    // Removes a file from the list (e.g., after successful deletion from server)
+    // Removes a file from the list by its DB id
     removeFileById: (state, action: PayloadAction<string>) => {
       state.files = state.files.filter((file) => file.id !== action.payload);
     },
-    // Clears all files, e.g., after successful submission
     clearFiles: (state) => {
       state.files = [];
       state.error = null;
@@ -82,15 +95,16 @@ export const uploadSlice = createSlice({
     setSuccess: (state, action: PayloadAction<string | null>) => {
       state.success = action.payload;
     },
-    // Reset the entire state
     resetUploadState: () => initialState,
   },
 });
 
 export const {
+  addFilesToQueue,
+  updateFileUploadState,
   setFiles,
   updateFile,
-  updateMultipleFiles, // Export the new action
+  updateMultipleFiles,
   removeFileById,
   clearFiles,
   setUploading,

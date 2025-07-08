@@ -23,7 +23,7 @@ export async function deleteMultipleImagesFromS3(keys: string[]): Promise<void> 
   }
 
   const deleteParams = {
-    Bucket: process.env.BUCKET_NAME,
+    Bucket: process.env.AWS_BUCKET_NAME,
     Delete: {
       Objects: keys.map(key => ({ Key: key })),
       Quiet: false, // Set to false to get reports on successes and errors
@@ -110,39 +110,39 @@ export async function deleteImageFromS3(key: string): Promise<void> {
 
 
 // Function to generate a pre-signed URL for direct browser upload
-export async function getPresignedUploadUrl(
-  folderName: string,
-  fileName: string,
-  contentType: string = 'image/jpeg'
-): Promise<{ url: string; key: string }> {
-  // Generate a unique key for the file
-  const key = `${folderName}/${Date.now()}-${fileName}`;
+// export async function getPresignedUploadUrl(
+//   folderName: string,
+//   fileName: string,
+//   contentType: string = 'image/jpeg'
+// ): Promise<{ url: string; key: string }> {
+//   // Generate a unique key for the file
+//   const key = `${folderName}/${Date.now()}-${fileName}`;
 
-  // Set up the upload parameters
-  const params = {
-    Bucket: process.env.AWS_S3_BUCKET_NAME || '',
-    Key: key,
-    ContentType: contentType,
-  };
+//   // Set up the upload parameters
+//   const params = {
+//     Bucket: process.env.AWS_BUCKET_NAME || '',
+//     Key: key,
+//     ContentType: contentType,
+//   };
 
-  try {
-    // Create a command for putting an object in the bucket
-    const command = new PutObjectCommand(params);
+//   try {
+//     // Create a command for putting an object in the bucket
+//     const command = new PutObjectCommand(params);
 
-    // Generate a pre-signed URL that expires in 15 minutes
-    const url = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+//     // Generate a pre-signed URL that expires in 15 minutes
+//     const url = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
-    return { url, key };
-  } catch (error) {
-    console.error('Error generating pre-signed URL:', error);
-    throw error;
-  }
-}
+//     return { url, key };
+//   } catch (error) {
+//     console.error('Error generating pre-signed URL:', error);
+//     throw error;
+//   }
+// }
 
 // Function to generate a pre-signed URL for reading an S3 object
 export async function getSignedReadUrl(key: string): Promise<string> {
   const params = {
-    Bucket: process.env.AWS_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || '',
+    Bucket: process.env.AWS_BUCKET_NAME || '',
     Key: key,
   };
 
@@ -177,5 +177,35 @@ export function extractS3Key(url: string): string | null {
   } catch (error) {
     console.error('Error extracting S3 key from URL:', error);
     return null;
+  }
+}
+const BUCKET_NAME = process.env.AWS_BUCKET_NAME || '';
+
+export async function getPresignedUploadUrl(
+  folderName: string,
+  fileName: string,
+  contentType: string
+): Promise<{ url: string; key: string }> {
+  // Add a check to ensure the bucket name is configured
+  if (!BUCKET_NAME) {
+    throw new Error("AWS_BUCKET_NAME environment variable is not set.");
+  }
+
+  const key = `${folderName}/${Date.now()}-${fileName}`;
+
+  const params = {
+    Bucket: BUCKET_NAME, // Standardized variable
+    Key: key,
+    ContentType: contentType,
+  };
+
+  try {
+    const command = new PutObjectCommand(params);
+    // The URL is valid for 15 minutes (900 seconds)
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+    return { url, key };
+  } catch (error) {
+    console.error('Error generating pre-signed URL:', error);
+    throw error;
   }
 }

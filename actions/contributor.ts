@@ -5,13 +5,14 @@
 import { auth } from "@/auth";
 import { db } from "@/lib/prisma";
 import { bufferizeFile } from "@/lib/cloudinary"; // Assuming this is a general buffer utility now
-import { uploadImageToS3, deleteImageFromS3, getSignedReadUrl, deleteMultipleImagesFromS3 } from "@/lib/s3";
+import { uploadImageToS3, deleteImageFromS3, getSignedReadUrl, deleteMultipleImagesFromS3, getPresignedUploadUrl } from "@/lib/s3";
 import { hasContributorAccess } from "@/lib/permissions";
 import { ContributorItemStatus, InitialUpload } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { generatePreviewWithWatermarkSafe } from "@/lib/image-processing";
 import { sanitizeFileName, getPreviewFileName } from "@/lib/file-utils";
 import { UploadFile } from "@/redux/features/uploadSlice";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 // ===================================================================
 // FUNCTIONS FOR MANAGING INITIAL UPLOADS (REVISED)
@@ -128,6 +129,97 @@ export async function getInitialUploadsWithSignedUrls(): Promise<UploadFile[]> {
   return uploadsWithUrls.filter(upload => upload.previewUrl);
 }
 
+
+interface PresignedUrlRequest {
+  fileName: string;
+  fileType: string;
+}
+
+/**
+ * 1. Generates pre-signed URLs for clients to upload files directly to S3.
+ */
+export async function getPresignedUrls(files: PresignedUrlRequest[]): Promise<{ url: string, key: string }[]> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
+  if (!(await hasContributorAccess())) throw new Error("You don't have permission to upload content.");
+
+  const userId = session.user.id;
+  const folderName = `freepik-contributors/${userId}`;
+
+  try {
+    const presignedUrlData = await Promise.all(
+      files.map(file => {
+        const sanitizedFileName = sanitizeFileName(file.fileName);
+        return getPresignedUploadUrl(folderName, sanitizedFileName, file.fileType);
+      })
+    );
+    return presignedUrlData;
+  } catch (error) {
+    console.error("Error generating pre-signed URLs:", error);
+    throw new Error("Could not prepare files for upload.");
+  }
+}
+
+interface FinalizeUploadRequest {
+  s3Key: string;
+  originalFileName: string;
+  fileSize: number;
+  mimeType: string;
+}
+
+/**
+ * 2. Finalizes an upload after the client pushes the file to S3.
+ *    This involves generating a preview and creating the database record.
+ */
+export async function finalizeUpload(fileData: FinalizeUploadRequest): Promise<InitialUpload> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Not authenticated.");
+
+  const { s3Key, originalFileName, fileSize, mimeType } = fileData;
+  const userId = session.user.id;
+  const folderName = `freepik-contributors/${userId}`;
+
+  try {
+    // A. Fetch the just-uploaded original file from S3
+    const s3Client = new S3Client({ region: process.env.AWS_REGION });
+    const getObjectCommand = new GetObjectCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: s3Key,
+    });
+    const { Body } = await s3Client.send(getObjectCommand);
+    if (!Body) throw new Error(`Could not retrieve uploaded file from S3: ${s3Key}`);
+    const originalBuffer = Buffer.from(await Body.transformToByteArray());
+
+    // B. Generate watermarked preview
+    const previewBuffer = await generatePreviewWithWatermarkSafe(originalBuffer);
+    if (!previewBuffer) throw new Error(`Failed to generate preview for "${originalFileName}".`);
+
+    // C. Upload the preview file to S3
+    const previewFileName = getPreviewFileName(originalFileName);
+    const { key: previewS3Key } = await uploadImageToS3(previewBuffer, folderName, previewFileName);
+
+    // D. Create the database record
+    const newUploadRecord = await db.initialUpload.create({
+      data: {
+        userId,
+        s3Key,
+        previewS3Key,
+        originalFileName,
+        fileSize,
+        mimeType,
+      }
+    });
+
+    revalidatePath('/contributor/upload');
+    return newUploadRecord;
+
+  } catch (error: any) {
+    console.error("Error finalizing upload:", error);
+    // Attempt to clean up the original file if finalization fails
+    await deleteImageFromS3(s3Key).catch(cleanupError => console.error("Cleanup failed for", s3Key, cleanupError));
+    throw new Error(error.message || "An unexpected error occurred while processing the file.");
+  }
+}
 /**
  * Deletes ALL specified initial uploads and their corresponding files from S3.
  * This function was already well-written and efficient. No changes needed.

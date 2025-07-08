@@ -1,5 +1,6 @@
 "use client";
 
+import axios from "axios"; // Import axios for upload with progress
 import { useState, useCallback, useEffect, useDeferredValue } from "react";
 import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
@@ -9,16 +10,16 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { Button } from "@/components/ui/button";
 import {
-  handleInitialUploads,
   getInitialUploadsWithSignedUrls,
   deleteInitialUpload,
   createContributorItemsFromUploads,
-  deleteAllInitialUploads
+  deleteAllInitialUploads, getPresignedUrls,
+  finalizeUpload,
 } from "@/actions/contributor";
 import { getBase64FromUrl } from "@/actions/getBase64FromUrl";
 
 import { RootState } from "@/redux/store";
-import { toast } from "sonner";
+import toast from "react-hot-toast"; // <--- 1. Replaced 'sonner' with 'react-hot-toast'
 import {
   setFiles,
   updateFile,
@@ -26,7 +27,8 @@ import {
   clearFiles,
   setUploading,
   setError,
-  setSuccess,
+  setSuccess, addFilesToQueue,
+  updateFileUploadState,
 } from "@/redux/features/uploadSlice";
 import {
   categoryOptions,
@@ -45,9 +47,6 @@ import {
 } from "@/components/ui/alert-dialog";
 
 
-// =================================================================
-// ==  MODIFIED: New file size constants as per your request     ==
-// =================================================================
 // Maximum single file size (45MB)
 const MAX_SINGLE_FILE_SIZE = 45 * 1024 * 1024;
 // Maximum total size for a single batch upload (260MB)
@@ -107,9 +106,23 @@ export function UploadForm() {
   const loadInitialFiles = useCallback(async () => {
     try {
       const initialFiles = await getInitialUploadsWithSignedUrls();
-      dispatch(setFiles(initialFiles));
-      if (initialFiles.length > 0) {
-        // Reset selection logic to avoid out-of-bounds errors
+
+      const filesWithRestoredProgress = initialFiles.map(file => {
+        const savedProgressRaw = localStorage.getItem(`upload-progress-${file.id}`);
+        if (savedProgressRaw) {
+          try {
+            const savedProgress = JSON.parse(savedProgressRaw);
+            return { ...file, ...savedProgress };
+          } catch (e) {
+            console.error("Failed to parse saved progress for file", file.id, e);
+            return file;
+          }
+        }
+        return file;
+      });
+
+      dispatch(setFiles(filesWithRestoredProgress));
+      if (filesWithRestoredProgress.length > 0) {
         setActiveFileIndex(0);
         setSelectedFiles([0]);
       } else {
@@ -131,52 +144,98 @@ export function UploadForm() {
     };
   }, [loadInitialFiles, dispatch]);
 
-  // =================================================================
-  // ==  MODIFIED: `onDrop` now checks for collective file size    ==
-  // =================================================================
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
-    // Check for total file size of the batch
     const totalSize = acceptedFiles.reduce((acc, file) => acc + file.size, 0);
     if (totalSize > MAX_TOTAL_FILE_SIZE) {
       toast.error(`Total file size exceeds the limit. Please upload less than ${MAX_TOTAL_FILE_SIZE / 1024 / 1024}MB at a time.`);
-      return; // Stop the upload process
+      return;
     }
 
-    dispatch(setUploading(true));
-    toast.loading("Uploading your files...", { id: "upload-toast" });
+    const filesToUpload = acceptedFiles.map(file => ({
+      file,
+      tempId: `${file.name}-${file.size}-${Date.now()}`
+    }));
 
-    const formData = new FormData();
-    acceptedFiles.forEach(file => {
-      formData.append("files", file);
-    });
+    const filesForQueue: UploadFile[] = filesToUpload.map(({ file, tempId }) => ({
+      id: tempId,
+      tempId,
+      status: 'uploading',
+      progress: 0,
+      previewUrl: URL.createObjectURL(file),
+      originalFileName: file.name,
+      title: file.name.split('.').slice(0, -1).join('.').replace(/[-_]/g, ' '),
+      description: '', tags: [], license: 'STANDARD', category: '',
+      imageType: file.type.includes('png') ? 'PNG' : 'JPG',
+      aiGeneratedStatus: 'NOT_AI_GENERATED'
+    }));
+    dispatch(addFilesToQueue(filesForQueue));
 
     try {
-      await handleInitialUploads(formData);
-      toast.success("Files uploaded successfully!", { id: "upload-toast", duration: 4000 });
-      await loadInitialFiles();
+      const presignedUrlRequests = filesToUpload.map(({ file }) => ({
+        fileName: file.name,
+        fileType: file.type,
+      }));
+      const presignedUrlResponses = await getPresignedUrls(presignedUrlRequests);
+
+      const uploadPromises = filesToUpload.map(async ({ file, tempId }, index) => {
+        const { url: presignedUrl, key: s3Key } = presignedUrlResponses[index];
+
+        await axios.put(presignedUrl, file, {
+          headers: { 'Content-Type': file.type },
+          onUploadProgress: (progressEvent) => {
+            const progress = progressEvent.total
+              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              : 0;
+            dispatch(updateFileUploadState({ tempId, data: { progress } }));
+          },
+        });
+
+        dispatch(updateFileUploadState({ tempId, data: { progress: 100, status: 'processing' } }));
+
+        const finalizationData = {
+          s3Key,
+          originalFileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+        };
+        const newRecord = await finalizeUpload(finalizationData);
+
+        const finalPreviewUrl = await getInitialUploadsWithSignedUrls().then(uploads =>
+          uploads.find(u => u.id === newRecord.id)?.previewUrl || ''
+        );
+
+        dispatch(updateFileUploadState({
+          tempId,
+          data: {
+            id: newRecord.id,
+            status: 'complete',
+            previewUrl: finalPreviewUrl,
+          }
+        }));
+      });
+
+      await Promise.all(uploadPromises);
+      toast.success("All files uploaded successfully!");
+
     } catch (err: any) {
-      toast.error(`Upload failed: ${err.message}`, { id: "upload-toast" });
+      toast.error(`Upload failed: ${err.message}`);
       dispatch(setError(err.message));
     } finally {
       dispatch(setUploading(false));
     }
-  }, [dispatch, loadInitialFiles]);
+  }, [dispatch]);
 
-  // =================================================================
-  // ==  MODIFIED: `useDropzone` now uses the new single file size ==
-  // =================================================================
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     accept: { 'image/*': ['.jpeg', '.jpg', '.png', '.gif'] },
-    maxSize: MAX_SINGLE_FILE_SIZE, // Use the 45MB limit for single files
+    maxSize: MAX_SINGLE_FILE_SIZE,
     disabled: isUploading || initialLoading,
     onDropRejected: (fileRejections) => {
       fileRejections.forEach(rejection => {
         rejection.errors.forEach(err => {
           if (err.code === 'file-too-large') {
-            // Updated error message for single file size
             toast.error(`File is too large. Maximum size is ${MAX_SINGLE_FILE_SIZE / 1024 / 1024}MB.`);
           } else {
             toast.error(err.message);
@@ -192,7 +251,10 @@ export function UploadForm() {
     if (!fileToRemove) return;
 
     const originalFileCount = files.length;
-    toast.loading(`Deleting ${fileToRemove.originalFileName}...`, { id: `delete-${fileToRemove.id}` });
+    // --- 2. Updated toast logic for react-hot-toast ---
+    const toastId = toast.loading(`Deleting ${fileToRemove.originalFileName}...`);
+
+    localStorage.removeItem(`upload-progress-${fileToRemove.id}`);
 
     dispatch(removeFileById(fileToRemove.id));
     setSelectedFiles(prev => prev.filter(i => i !== index).map(i => i > index ? i - 1 : i));
@@ -204,26 +266,28 @@ export function UploadForm() {
 
     try {
       await deleteInitialUpload(fileToRemove.id);
-      toast.success("File deleted successfully.", { id: `delete-${fileToRemove.id}` });
+      toast.success("File deleted successfully.", { id: toastId });
     } catch (err: any) {
-      toast.error(`Failed to delete file: ${err.message}`, { id: `delete-${fileToRemove.id}` });
+      toast.error(`Failed to delete file: ${err.message}`, { id: toastId });
       await loadInitialFiles();
     }
   };
 
   const confirmDeleteAll = async () => {
     if (files.length === 0) return;
-    toast.loading(`Deleting all ${files.length} files...`, { id: "delete-all-toast" });
+    const toastId = toast.loading(`Deleting all ${files.length} files...`);
     const fileIds = files.map(f => f.id);
+
+    fileIds.forEach(id => localStorage.removeItem(`upload-progress-${id}`));
 
     try {
       const result = await deleteAllInitialUploads(fileIds);
-      toast.success(`${result.count} files deleted successfully.`, { id: "delete-all-toast" });
+      toast.success(`${result.count} files deleted successfully.`, { id: toastId });
       dispatch(clearFiles());
       setActiveFileIndex(null);
       setSelectedFiles([]);
     } catch (err: any) {
-      toast.error(`Failed to delete all files: ${err.message}`, { id: "delete-all-toast" });
+      toast.error(`Failed to delete all files: ${err.message}`, { id: toastId });
       await loadInitialFiles();
     } finally {
       setShowDeleteAllDialog(false);
@@ -241,55 +305,89 @@ export function UploadForm() {
     );
   };
 
-  const canSubmitForReview = files.some(isFileComplete);
-  const canSaveAsDraft = files.some(file => file.title?.trim() && file.description?.trim());
+  // =================================================================
+  // ==  HERE IS YOUR FUNCTION, AS YOU PROVIDED IT.
+  // =================================================================
+  const handleSaveProgress = () => {
+    if (selectedFiles.length === 0) {
+      toast.error("No files selected to save.");
+      return;
+    }
 
-  const handleSubmitAll = async (saveAsDraft: boolean = false) => {
+    let savedCount = 0;
+    selectedFiles.forEach(index => {
+      const file = files[index];
+      if (file && file.id && file.status === 'complete') {
+        const metadata = {
+          title: file.title,
+          description: file.description,
+          tags: file.tags,
+          category: file.category,
+          license: file.license,
+          imageType: file.imageType,
+          aiGeneratedStatus: file.aiGeneratedStatus,
+        };
+        localStorage.setItem(`upload-progress-${file.id}`, JSON.stringify(metadata));
+        savedCount++;
+      }
+    });
+
+    if (savedCount > 0) {
+      // THIS IS THE TOAST YOU WANTED TO SHOW. IT WILL FIRE CORRECTLY.
+      toast.success(`Progress for ${savedCount} image(s) saved locally.`);
+    }
+  };
+
+  const handleSubmitAll = async () => {
     if (files.length === 0) {
       toast.error("There are no files to submit.");
       return;
     }
 
     const filesToSubmit = files
-      .filter(file => saveAsDraft ? (file.title?.trim() && file.description?.trim()) : isFileComplete(file))
+      .filter(file => isFileComplete(file))
       .map(({ previewUrl, originalFileName, ...rest }) => rest);
 
     if (filesToSubmit.length === 0) {
-      toast.error(saveAsDraft ? "Add a title and description to at least one image to save it as a draft." : "Complete required fields for at least one image.");
+      toast.error("Complete required fields for at least one image to submit.");
       return;
     }
 
     dispatch(setUploading(true));
-    toast.loading(saveAsDraft ? "Saving drafts..." : "Submitting files for review...", { id: "submit-toast" });
+    const toastId = toast.loading("Submitting files for review...");
 
     try {
-      const result = await createContributorItemsFromUploads(filesToSubmit, saveAsDraft);
+      const result = await createContributorItemsFromUploads(filesToSubmit, false);
 
       if (result.count > 0) {
-        toast.success(`${result.count} file(s) were successfully ${saveAsDraft ? 'saved as drafts' : 'submitted'}.`, { id: "submit-toast" });
+        toast.success(`${result.count} file(s) were successfully submitted.`, { id: toastId });
+
+        filesToSubmit.forEach(file => {
+          localStorage.removeItem(`upload-progress-${file.id}`);
+        });
 
         const allFilesWereSubmitted = filesToSubmit.length === files.length;
-
         if (allFilesWereSubmitted) {
           dispatch(setSuccess("Submission complete!"));
           setTimeout(() => {
-            router.push(saveAsDraft ? '/contributor/drafts' : '/contributor/under-review');
+            router.push('/contributor/under-review');
             dispatch(clearFiles());
           }, 1500);
         } else {
           await loadInitialFiles();
         }
       } else {
-        toast.error("No files were submitted. They may have been processed already.", { id: "submit-toast" });
+        toast.error("No files were submitted. They may have been processed already.", { id: toastId });
         await loadInitialFiles();
       }
     } catch (err: any) {
-      toast.error(`Submission failed: ${err.message}`, { id: "submit-toast" });
+      toast.error(`Submission failed: ${err.message}`, { id: toastId });
       dispatch(setError(err.message));
     } finally {
       dispatch(setUploading(false));
     }
   };
+
 
   useEffect(() => {
     files.forEach(async (file) => {
@@ -330,17 +428,20 @@ export function UploadForm() {
     const apiKey = localStorage.getItem("geminiApiKey");
     if (!apiKey) {
       toast.error(
-        <div className="flex flex-col gap-2">
-          <span>Gemini API key is missing.</span>
-          <a href="/contributor/settings" className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 text-center">Go to Settings</a>
-        </div>
+        // react-hot-toast supports JSX just like sonner
+        () => (
+          <div className="flex flex-col gap-2">
+            <span>Gemini API key is missing.</span>
+            <a href="/contributor/settings" className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 text-center">Go to Settings</a>
+          </div>
+        )
       );
       return;
     }
 
     setIsGenerating(true);
     dispatch(setError(null));
-    toast.loading("Generating content with AI...", { id: "ai-gen-single" });
+    const toastId = toast.loading("Generating content with AI...");
 
     try {
       const file = files[activeFileIndex];
@@ -387,7 +488,10 @@ export function UploadForm() {
       const generatedContent = JSON.parse(jsonMatch[0]);
       if (!CATEGORY_OPTIONS.some(cat => cat.value === generatedContent.category)) {
         generatedContent.category = '';
-        toast.warning("AI suggested a category that doesn't exist. Please select one manually.");
+        // --- 3. Replaced toast.warning with a standard toast call ---
+        toast("AI suggested a category that doesn't exist. Please select one manually.", {
+          icon: '⚠️'
+        });
       }
 
       dispatch(updateFile({
@@ -400,10 +504,10 @@ export function UploadForm() {
         }
       }));
 
-      toast.success("Content generated successfully!", { id: "ai-gen-single" });
+      toast.success("Content generated successfully!", { id: toastId });
     } catch (err: any) {
       console.error(err);
-      toast.error(`AI generation failed: ${err.message}`, { id: "ai-gen-single" });
+      toast.error(`AI generation failed: ${err.message}`, { id: toastId });
       dispatch(setError(err.message || "Failed to generate content."));
     } finally {
       setIsGenerating(false);
@@ -420,10 +524,12 @@ export function UploadForm() {
     const apiKey = localStorage.getItem("geminiApiKey");
     if (!apiKey) {
       toast.error(
-        <div className="flex flex-col gap-2">
-          <span>Gemini API key is missing.</span>
-          <a href="/contributor/settings" className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 text-center">Go to Settings</a>
-        </div>
+        () => (
+          <div className="flex flex-col gap-2">
+            <span>Gemini API key is missing.</span>
+            <a href="/contributor/settings" className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 text-center">Go to Settings</a>
+          </div>
+        )
       );
       return;
     }
@@ -437,7 +543,8 @@ export function UploadForm() {
 
     for (const index of selectedFiles) {
       const file = files[index];
-      toast.loading(`Processing image ${processedCount + 1}/${selectedFiles.length}...`, { id: `ai-gen-${file.id}` });
+      const toastId = `ai-gen-${file.id}`; // Use a consistent ID for each file's toast
+      toast.loading(`Processing image ${processedCount + 1}/${selectedFiles.length}...`, { id: toastId });
 
       try {
         const imageResult = await getBase64FromUrl(file.previewUrl);
@@ -492,11 +599,11 @@ export function UploadForm() {
         }));
 
         processedCount++;
-        toast.success(`Generated content for image ${processedCount}`, { id: `ai-gen-${file.id}` });
+        toast.success(`Generated content for image ${processedCount}`, { id: toastId });
       } catch (err: any) {
         console.error(`Failed to generate content for image at index ${index}:`, err);
         failedCount++;
-        toast.error(`Failed for image ${processedCount + failedCount}`, { id: `ai-gen-${file.id}` });
+        toast.error(`Failed for image ${processedCount + failedCount}`, { id: toastId });
       }
 
       if (selectedFiles.length > 1 && (processedCount + failedCount) < selectedFiles.length) {
@@ -543,6 +650,60 @@ export function UploadForm() {
     );
   }
 
+  const renderGrid = () => (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 max-h-[calc(100vh-300px)] overflow-y-auto pr-12 custom-scrollbar scroll-smooth">
+      {deferredFiles.map((file, index) => {
+        const isComplete = isFileComplete(file);
+        const isSelectedForEditing = index === activeFileIndex;
+        const isSelectedForBulk = selectedFiles.includes(index);
+
+        return (
+          <div
+            key={file.id || file.tempId}
+            className={`relative group overflow-hidden rounded-lg shadow-md transition-all ${file.status === 'complete' ? 'cursor-pointer' : 'cursor-default'} ${isSelectedForEditing ? 'border-2 border-indigo-500 ring-2 ring-indigo-500/30' : isSelectedForBulk ? 'border-2 border-indigo-400 ring-1 ring-indigo-400/20' : 'border border-gray-700 hover:border-gray-600'}`}
+            onClick={() => file.status === 'complete' && handleActivateFile(index)}
+            style={{ aspectRatio: '1/1', backgroundColor: '#1f2937' }}>
+
+            {file.status !== 'complete' && (
+              <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/70 text-white p-2">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <p className="text-sm font-medium mt-2 text-center">
+                  {file.status === 'uploading' ? `Uploading...` : 'Processing...'}
+                </p>
+                {file.status === 'uploading' && (
+                  <div className="w-full bg-gray-600 rounded-full h-1.5 mt-3">
+                    <div className="bg-indigo-500 h-1.5 rounded-full" style={{ width: `${file.progress || 0}%` }}></div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {file.status === 'complete' && (
+              <>
+                <div className="absolute top-2 left-2 z-30" title={isComplete ? "Complete" : "Incomplete"}>
+                  {isComplete ? <div className="w-7 h-7 flex items-center justify-center bg-green-500/80 text-white rounded-full"><Check className="h-4 w-4" /></div> : <div className="w-7 h-7 flex items-center justify-center bg-red-500/70 text-white rounded-full"><X className="h-4 w-4" /></div>}
+                </div>
+                <div className="absolute top-2 right-2 z-20">
+                  <button type="button" onClick={(e) => toggleFileSelection(index, e)} className="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-black/60 rounded-md transition-colors">
+                    {isSelectedForBulk ? <CheckSquare className="h-5 w-5 text-indigo-400" /> : <Square className="h-5 w-5 text-gray-300 group-hover:text-white" />}
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div className="absolute inset-0 flex items-center justify-center">
+              {file.imageType === 'PNG' && transparentImages[file.id] && (
+                <div className="absolute inset-0 bg-[length:16px_16px] bg-[linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937),linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937)]" style={{ backgroundPosition: "0 0, 8px 8px", backgroundSize: "16px 16px", zIndex: 0 }} />
+              )}
+              <img src={file.previewUrl} alt={file.title || ''} className={`w-full h-full transition-transform duration-200 group-hover:scale-105 ${file.imageType === 'PNG' && transparentImages[file.id] ? 'object-contain bg-transparent' : 'object-cover'}`} style={{ position: 'relative', zIndex: 1 }} onLoad={() => { if (file.previewUrl.startsWith('blob:')) URL.revokeObjectURL(file.previewUrl) }} />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-200" />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="relative flex flex-col h-full">
       <div className="w-full mx-auto px-6 py-6 h-full relative">
@@ -570,14 +731,13 @@ export function UploadForm() {
                     <h2 className="text-2xl font-medium text-white mb-2">Drag & drop your images here</h2>
                     <p className="text-gray-400 mb-8">Or click to browse files</p>
                     <button type="button" className="bg-indigo-600 hover:bg-indigo-700 text-white transition-colors px-8 py-3 rounded-lg font-medium text-lg">Select Files</button>
-                    {/* MODIFIED: Updated text to show correct file size limit */}
                     <p className="text-gray-500 text-sm mt-8">Maximum file size: {MAX_SINGLE_FILE_SIZE / 1024 / 1024}MB</p>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="h-full">
-                <div className="pr-[380px] h-full">
+                <div className="pr-[400px] h-full">
                   <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-4">
                       <h3 className="text-xl font-medium text-white">{files.length} image{files.length !== 1 ? 's' : ''} ready</h3>
@@ -605,37 +765,8 @@ export function UploadForm() {
 
                   {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 max-h-[calc(100vh-300px)] overflow-y-auto pr-12 custom-scrollbar scroll-smooth">
-                    {deferredFiles.map((file, index) => {
-                      const isComplete = isFileComplete(file);
-                      const isSelectedForEditing = index === activeFileIndex;
-                      const isSelectedForBulk = selectedFiles.includes(index);
+                  {renderGrid()}
 
-                      return (
-                        <div
-                          key={file.id}
-                          className={`relative group cursor-pointer overflow-hidden rounded-lg shadow-md transition-all ${isSelectedForEditing ? 'border-2 border-indigo-500 ring-2 ring-indigo-500/30' : isSelectedForBulk ? 'border-2 border-indigo-400 ring-1 ring-indigo-400/20' : 'border border-gray-700 hover:border-gray-600'}`}
-                          onClick={() => handleActivateFile(index)}
-                          style={{ aspectRatio: '1/1', backgroundColor: '#1f2937' }}>
-                          <div className="absolute top-2 left-2 z-30" title={isComplete ? "Complete" : "Incomplete"}>
-                            {isComplete ? <div className="w-7 h-7 flex items-center justify-center bg-green-500/80 text-white rounded-full"><Check className="h-4 w-4" /></div> : <div className="w-7 h-7 flex items-center justify-center bg-red-500/70 text-white rounded-full"><X className="h-4 w-4" /></div>}
-                          </div>
-                          <div className="absolute top-2 right-2 z-20">
-                            <button type="button" onClick={(e) => toggleFileSelection(index, e)} className="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-black/60 rounded-md transition-colors">
-                              {isSelectedForBulk ? <CheckSquare className="h-5 w-5 text-indigo-400" /> : <Square className="h-5 w-5 text-gray-300 group-hover:text-white" />}
-                            </button>
-                          </div>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            {file.imageType === 'PNG' && transparentImages[file.id] && (
-                              <div className="absolute inset-0 bg-[length:16px_16px] bg-[linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937),linear-gradient(45deg,#1f2937_25%,transparent_25%,transparent_75%,#1f2937_75%,#1f2937)]" style={{ backgroundPosition: "0 0, 8px 8px", backgroundSize: "16px 16px", zIndex: 0 }} />
-                            )}
-                            <img src={file.previewUrl} alt={file.title || ''} className={`w-full h-full transition-transform duration-200 group-hover:scale-105 ${file.imageType === 'PNG' && transparentImages[file.id] ? 'object-contain bg-transparent' : 'object-cover'}`} style={{ position: 'relative', zIndex: 1 }} />
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-200" />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
             )}
@@ -658,6 +789,7 @@ export function UploadForm() {
                 isUploading={isUploading || initialLoading}
                 transparentImages={transparentImages}
                 handleSubmitAll={handleSubmitAll}
+                handleSaveProgress={handleSaveProgress}
                 isFileComplete={isFileComplete}
               />
             )}

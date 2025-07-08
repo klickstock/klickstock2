@@ -107,7 +107,7 @@ export const Sidebar = () => {
   ];
 
   const contentItems = [
-    { label: "Upload", href: "/contributor/drafts", icon: <DocumentIcon className="w-5 h-5" />, count: counts.drafts },
+    // { label: "Upload", href: "/contributor/drafts", icon: <DocumentIcon className="w-5 h-5" />, count: counts.drafts },
     { label: "Under Review", href: "/contributor/under-review", icon: <ClockIcon className="w-5 h-5" />, count: counts.pending },
     { label: "Rejections", href: "/contributor/rejections", icon: <ExclamationCircleIcon className="w-5 h-5" />, count: counts.rejected },
     { label: "Published", href: "/contributor/published", icon: <CheckCircleIcon className="w-5 h-5" />, count: counts.approved }
