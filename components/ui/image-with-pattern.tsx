@@ -102,11 +102,10 @@
 //     </div>
 //   );
 // }
-
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 interface ImageWithPatternProps {
@@ -115,15 +114,22 @@ interface ImageWithPatternProps {
   fill?: boolean;
   width?: number;
   height?: number;
-  className?: string;
+  className?: string; // This will be applied to the main container for layout
+  imageClassName?: string; // This will be applied directly to the Next/Image tag
   sizes?: string;
   priority?: boolean;
   quality?: number;
-  isPNG?: boolean;
   imageType?: string;
   showResolution?: boolean;
+  isGallery?: boolean; // The new prop to control pattern visibility
+  objectFit?: "contain" | "cover";
 }
 
+/**
+ * A responsive image component that intelligently displays a checkerboard
+ * pattern behind transparent images (like PNGs), except when used in a gallery.
+ * It is fully optimized by Next.js and efficiently calculates image resolution on load.
+ */
 export function ImageWithPattern({
   src,
   alt,
@@ -131,44 +137,49 @@ export function ImageWithPattern({
   width,
   height,
   className,
+  imageClassName,
   sizes,
   priority = false,
   quality,
-  isPNG,
   imageType,
   showResolution = false,
+  isGallery = false, // Default to false
+  objectFit = "cover", // Default to 'cover' as it's common, but can be overridden
   ...props
 }: ImageWithPatternProps) {
-  // Determine if the image is PNG based on props or file extension
-  const [shouldShowPattern, setShouldShowPattern] = useState<boolean>(
-    isPNG || imageType === "PNG" || src?.toLowerCase().endsWith(".png")
-  );
 
-  const [imageResolution, setImageResolution] = useState<string>("");
+  // --- IMPROVED LOGIC ---
+  // 1. Determine if the image format is likely transparent.
+  const isPngOrTransparent = imageType === "PNG" || src?.toLowerCase().endsWith(".png");
+  // 2. The pattern should only show if it's a PNG AND we are NOT in a gallery context.
+  const showPattern = isPngOrTransparent && !isGallery;
 
-  // Get image resolution
-  useEffect(() => {
-    if (showResolution && typeof window !== 'undefined') {
-      const imgElement = document.createElement('img');
-      imgElement.onload = () => {
-        setImageResolution(`${imgElement.width} × ${imgElement.height}`);
-      };
-      imgElement.src = src;
+  const [resolution, setResolution] = useState<string>("");
+
+  // --- MORE EFFICIENT RESOLUTION HANDLING ---
+  // We use the onLoadingComplete callback from Next/Image, which is much more
+  // performant than creating a new `<img>` element manually.
+  // This avoids a second network request for the same image.
+  const handleLoadingComplete = (img: HTMLImageElement) => {
+    if (showResolution) {
+      setResolution(`${img.naturalWidth} × ${img.naturalHeight}`);
     }
-  }, [src, showResolution]);
+  };
 
-  // Prevent right-click context menu
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    return false;
   };
 
   return (
-    <div className={cn("relative overflow-hidden", className)} onContextMenu={handleContextMenu}>
+    <div
+      className={cn("relative overflow-hidden", className)}
+      onContextMenu={handleContextMenu}
+    >
       {/* Simple checkered background for transparent images */}
-      {shouldShowPattern && (
+      {showPattern && (
         <div className="absolute inset-0 bg-[#f8f8f8]">
-          <div className="absolute inset-0 opacity-50"
+          <div
+            className="absolute inset-0 opacity-50"
             style={{
               backgroundImage: `
                 linear-gradient(45deg, #e0e0e0 25%, transparent 25%),
@@ -183,28 +194,37 @@ export function ImageWithPattern({
         </div>
       )}
 
-      {/* The actual image */}
-      <div className="relative w-full h-full">
-        <Image
-          src={src}
-          alt={alt}
-          fill={fill}
-          width={!fill ? width : undefined}
-          height={!fill ? height : undefined}
-          className={cn("object-contain", className)}
-          sizes={sizes}
-          priority={priority}
-          quality={quality}
-          unoptimized={shouldShowPattern}
-          {...props}
-        />
-      </div>
+      {/* 
+        The actual image.
+        --- CRITICAL PERFORMANCE FIX ---
+        We removed `unoptimized={true}`. The component is now structured so the
+        Next/Image (with transparency) sits on top of the pattern div. 
+        This allows Next.js to fully optimize the image (e.g., to WebP) 
+        while still achieving the desired visual effect.
+      */}
+      <Image
+        src={src}
+        alt={alt}
+        fill={fill}
+        width={!fill ? width : undefined}
+        height={!fill ? height : undefined}
+        className={cn(
+          `object-${objectFit}`, // Use the objectFit prop
+          "relative z-10",       // Ensure the image is on top of the pattern
+          imageClassName         // Apply any extra classes for the image itself
+        )}
+        sizes={sizes}
+        priority={priority}
+        quality={quality}
+        onLoadingComplete={handleLoadingComplete}
+        {...props}
+      />
 
-      {showResolution && imageResolution && (
+      {/* {showResolution && resolution && (
         <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-md z-20">
-          {imageResolution}
+          {resolution}
         </div>
-      )}
+      )} */}
     </div>
   );
-} 
+}

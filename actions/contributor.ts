@@ -41,6 +41,7 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
         if (!file.type.startsWith("image/")) throw new Error(`File "${file.name}" is not a valid image type.`);
 
         const originalBuffer = await bufferizeFile(file);
+
         const previewBuffer = await generatePreviewWithWatermarkSafe(originalBuffer);
         if (!previewBuffer) throw new Error(`Failed to generate preview for "${file.name}".`);
 
@@ -191,6 +192,8 @@ export async function finalizeUpload(fileData: FinalizeUploadRequest): Promise<I
     const originalBuffer = Buffer.from(await Body.transformToByteArray());
 
     // B. Generate watermarked preview
+    // **OPTIMIZATION NOTE**: Same as above. Ensure this function resizes and compresses
+    // the image to create a small, fast-loading preview.
     const previewBuffer = await generatePreviewWithWatermarkSafe(originalBuffer);
     if (!previewBuffer) throw new Error(`Failed to generate preview for "${originalFileName}".`);
 
