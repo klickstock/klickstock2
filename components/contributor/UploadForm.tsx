@@ -168,7 +168,9 @@ export function UploadForm() {
       title: file.name.split('.').slice(0, -1).join('.').replace(/[-_]/g, ' '),
       description: '', tags: [], license: 'STANDARD', category: '',
       imageType: file.type.includes('png') ? 'PNG' : 'JPG',
-      aiGeneratedStatus: 'NOT_AI_GENERATED'
+      aiGeneratedStatus: 'NOT_AI_GENERATED',
+      width: null, // Initialize dimensions as null
+      height: null,
     }));
     dispatch(addFilesToQueue(filesForQueue));
 
@@ -202,16 +204,23 @@ export function UploadForm() {
         };
         const newRecord = await finalizeUpload(finalizationData);
 
-        const finalPreviewUrl = await getInitialUploadsWithSignedUrls().then(uploads =>
-          uploads.find(u => u.id === newRecord.id)?.previewUrl || ''
-        );
+        // After finalizing, refetch the list to get the full object with the signed URL and dimensions.
+        const allUploads = await getInitialUploadsWithSignedUrls();
+        const finalizedFile = allUploads.find(u => u.id === newRecord.id);
+
+        if (!finalizedFile) {
+          throw new Error(`Critical error: Could not find data for ${newRecord.originalFileName} after finalization.`);
+        }
 
         dispatch(updateFileUploadState({
           tempId,
           data: {
-            id: newRecord.id,
+            id: finalizedFile.id,
             status: 'complete',
-            previewUrl: finalPreviewUrl,
+            previewUrl: finalizedFile.previewUrl,
+            width: finalizedFile.width,
+            height: finalizedFile.height,
+            imageType: finalizedFile.imageType,
           }
         }));
       });
@@ -775,6 +784,10 @@ export function UploadForm() {
               <UploadSidebar
                 files={files}
                 activeFileIndex={activeFileIndex}
+                // NOTE: The active file's dimensions are now available inside UploadSidebar
+                // via `const activeFile = files[activeFileIndex];`
+                // You can then display `activeFile.width` and `activeFile.height`.
+                // Example: <p>{activeFile.width} x {activeFile.height} px</p>
                 setActiveFileIndex={setActiveFileIndex}
                 newTag={newTag}
                 setNewTag={setNewTag}

@@ -13,6 +13,7 @@ import { generatePreviewWithWatermarkSafe } from "@/lib/image-processing";
 import { sanitizeFileName, getPreviewFileName } from "@/lib/file-utils";
 import { UploadFile } from "@/redux/features/uploadSlice";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import sharp from "sharp";
 
 // ===================================================================
 // FUNCTIONS FOR MANAGING INITIAL UPLOADS (REVISED)
@@ -30,6 +31,13 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
   if (!files || files.length === 0) throw new Error("No files were provided for upload.");
 
   const userId = session.user.id;
+
+  // BEST PRACTICE: Verify user exists before proceeding
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new Error("User associated with this session not found. Please log out and log back in.");
+  }
+
   const folderName = `freepik-contributors/${userId}`;
   const maxSize = 50 * 1024 * 1024; // 50MB
 
@@ -42,15 +50,21 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
 
         const originalBuffer = await bufferizeFile(file);
 
-        const previewBuffer = await generatePreviewWithWatermarkSafe(originalBuffer);
-        if (!previewBuffer) throw new Error(`Failed to generate preview for "${file.name}".`);
+        const previewResult = await generatePreviewWithWatermarkSafe(originalBuffer);
+        if (!previewResult) {
+          throw new Error(`Failed to generate preview for "${file.name}".`);
+        }
+        const { buffer: previewBuffer, width, height } = previewResult;
 
         const sanitizedFileName = sanitizeFileName(file.name);
         const previewFileName = getPreviewFileName(file.name);
 
+        // Store previews in a dedicated subfolder for better organization
+        const previewFolderName = `${folderName}/previews`;
+
         const [originalUpload, previewUpload] = await Promise.all([
           uploadImageToS3(originalBuffer, folderName, sanitizedFileName),
-          uploadImageToS3(previewBuffer, folderName, previewFileName),
+          uploadImageToS3(previewBuffer, previewFolderName, previewFileName),
         ]);
 
         // Return the data needed for the database record
@@ -61,6 +75,8 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
           s3Key: originalUpload.key,
           previewS3Key: previewUpload.key,
           userId,
+          width,
+          height,
         };
       })
     );
@@ -90,6 +106,9 @@ export async function getInitialUploadsWithSignedUrls(): Promise<UploadFile[]> {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
 
+  // FIX: Removed the `select` block. The default `findMany` will fetch all
+  // scalar fields needed (id, s3Key, previewS3Key, width, height, etc.),
+  // which is required for other functions to work correctly.
   const uploads = await db.initialUpload.findMany({
     where: { userId: session.user.id, contributorItemId: null },
     orderBy: { createdAt: 'desc' },
@@ -111,6 +130,8 @@ export async function getInitialUploadsWithSignedUrls(): Promise<UploadFile[]> {
           category: '',
           imageType: upload.mimeType.includes('png') ? 'PNG' : 'JPG',
           aiGeneratedStatus: 'NOT_AI_GENERATED',
+          width: upload.width, // Pass dimensions to the client
+          height: upload.height,
         };
       } catch (urlError) {
         console.error(`Failed to get signed URL for ${upload.previewS3Key}:`, urlError);
@@ -122,12 +143,14 @@ export async function getInitialUploadsWithSignedUrls(): Promise<UploadFile[]> {
           title: 'Error loading preview',
           description: '', tags: [], license: 'STANDARD', category: '',
           imageType: 'JPG', aiGeneratedStatus: 'NOT_AI_GENERATED',
+          width: null,
+          height: null,
         };
       }
     })
   );
   // Filter out any items that failed to get a URL
-  return uploadsWithUrls.filter(upload => upload.previewUrl);
+  return uploadsWithUrls.filter(upload => upload.previewUrl) as UploadFile[];
 }
 
 
@@ -178,9 +201,16 @@ export async function finalizeUpload(fileData: FinalizeUploadRequest): Promise<I
 
   const { s3Key, originalFileName, fileSize, mimeType } = fileData;
   const userId = session.user.id;
-  const folderName = `freepik-contributors/${userId}`;
 
   try {
+    // BEST PRACTICE: Verify user exists before proceeding
+    const user = await db.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new Error("User associated with this session not found. Please log out and log back in.");
+    }
+
+    const folderName = `freepik-contributors/${userId}`;
+
     // A. Fetch the just-uploaded original file from S3
     const s3Client = new S3Client({ region: process.env.AWS_REGION });
     const getObjectCommand = new GetObjectCommand({
@@ -191,15 +221,17 @@ export async function finalizeUpload(fileData: FinalizeUploadRequest): Promise<I
     if (!Body) throw new Error(`Could not retrieve uploaded file from S3: ${s3Key}`);
     const originalBuffer = Buffer.from(await Body.transformToByteArray());
 
-    // B. Generate watermarked preview
-    // **OPTIMIZATION NOTE**: Same as above. Ensure this function resizes and compresses
-    // the image to create a small, fast-loading preview.
-    const previewBuffer = await generatePreviewWithWatermarkSafe(originalBuffer);
-    if (!previewBuffer) throw new Error(`Failed to generate preview for "${originalFileName}".`);
+    // B. Generate watermarked preview and get dimensions
+    const previewResult = await generatePreviewWithWatermarkSafe(originalBuffer);
+    if (!previewResult) {
+      throw new Error(`Failed to generate preview for "${originalFileName}".`);
+    }
+    const { buffer: previewBuffer, width, height } = previewResult;
 
-    // C. Upload the preview file to S3
+    // C. Upload the preview file to S3 in its own folder
+    const previewFolderName = `${folderName}/previews`;
     const previewFileName = getPreviewFileName(originalFileName);
-    const { key: previewS3Key } = await uploadImageToS3(previewBuffer, folderName, previewFileName);
+    const { key: previewS3Key } = await uploadImageToS3(previewBuffer, previewFolderName, previewFileName);
 
     // D. Create the database record
     const newUploadRecord = await db.initialUpload.create({
@@ -210,6 +242,8 @@ export async function finalizeUpload(fileData: FinalizeUploadRequest): Promise<I
         originalFileName,
         fileSize,
         mimeType,
+        width, // Save dimensions
+        height,
       }
     });
 
@@ -321,9 +355,9 @@ export async function createContributorItemsFromUploads(itemsToSubmit: Omit<Uplo
   for (const item of itemsToSubmit) {
     const initialUpload = validUploadsMap.get(item.id);
 
-    // Skip if the upload isn't valid (already submitted, not found, etc.)
-    if (!initialUpload) {
-      console.warn(`Skipping item ${item.id}: Not found, already submitted, or permission denied.`);
+    // Skip if the upload isn't valid (already submitted, not found, missing dimensions, etc.)
+    if (!initialUpload || initialUpload.width == null || initialUpload.height == null) {
+      console.warn(`Skipping item ${item.id}: Not found, missing dimensions, already submitted, or permission denied.`);
       continue;
     }
 
@@ -338,12 +372,15 @@ export async function createContributorItemsFromUploads(itemsToSubmit: Omit<Uplo
           data: {
             title: item.title, description: item.description, tags: item.tags,
             category: item.category,
-            license: item.license === 'EXTENDED' ? 'EXTENDED' : 'STANDARD',
-            imageType: item.imageType, aiGeneratedStatus: item.aiGeneratedStatus,
+            license: item.license, // Use the stricter type from Redux
+            imageType: item.imageType,
+            aiGeneratedStatus: item.aiGeneratedStatus,
             status: saveAsDraft ? ContributorItemStatus.DRAFT : ContributorItemStatus.PENDING,
             userId,
             imageUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.s3Key}`,
             previewUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.previewS3Key}`,
+            width: initialUpload.width,
+            height: initialUpload.height,
           }
         });
 
@@ -376,7 +413,7 @@ export async function createContributorItemsFromUploads(itemsToSubmit: Omit<Uplo
 }
 
 // ===================================================================
-// ORIGINAL FUNCTIONS (UNCHANGED)
+// ORIGINAL FUNCTIONS (NOW FIXED)
 // ===================================================================
 
 export async function uploadImageToServer(formData: FormData, saveDraft: boolean = false) {
@@ -416,6 +453,12 @@ export async function uploadImageToServer(formData: FormData, saveDraft: boolean
     const buffer = await bufferizeFile(file);
     const previewBuffer = await bufferizeFile(previewFile);
 
+    // Get image dimensions from the buffer
+    const { width, height } = await sharp(buffer).metadata();
+    if (!width || !height) {
+      throw new Error("Could not determine image dimensions.");
+    }
+
     const sanitizedFileName = sanitizeFileName(file.name);
     const previewFileName = getPreviewFileName(file.name);
 
@@ -429,6 +472,8 @@ export async function uploadImageToServer(formData: FormData, saveDraft: boolean
     const item = await db.contributorItem.create({
       data: {
         title, description, imageUrl, previewUrl,
+        width,
+        height,
         status: saveDraft ? ContributorItemStatus.DRAFT : ContributorItemStatus.PENDING,
         userId: session.user.id,
         license: license === "EXTENDED" ? "EXTENDED" : "STANDARD",

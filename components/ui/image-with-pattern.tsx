@@ -102,6 +102,9 @@
 //     </div>
 //   );
 // }
+
+
+
 "use client";
 
 import Image from "next/image";
@@ -112,24 +115,19 @@ interface ImageWithPatternProps {
   src: string;
   alt: string;
   fill?: boolean;
-  width?: number;
-  height?: number;
-  className?: string; // This will be applied to the main container for layout
-  imageClassName?: string; // This will be applied directly to the Next/Image tag
+  width?: number | null;
+  height?: number | null;
+  className?: string; // Applied to the main container for layout
+  imageClassName?: string; // Applied directly to the Next/Image tag
   sizes?: string;
   priority?: boolean;
   quality?: number;
   imageType?: string;
   showResolution?: boolean;
-  isGallery?: boolean; // The new prop to control pattern visibility
+  isGallery?: boolean;
   objectFit?: "contain" | "cover";
 }
 
-/**
- * A responsive image component that intelligently displays a checkerboard
- * pattern behind transparent images (like PNGs), except when used in a gallery.
- * It is fully optimized by Next.js and efficiently calculates image resolution on load.
- */
 export function ImageWithPattern({
   src,
   alt,
@@ -143,23 +141,16 @@ export function ImageWithPattern({
   quality,
   imageType,
   showResolution = false,
-  isGallery = false, // Default to false
-  objectFit = "cover", // Default to 'cover' as it's common, but can be overridden
+  isGallery = false,
+  objectFit = "cover",
   ...props
 }: ImageWithPatternProps) {
 
-  // --- IMPROVED LOGIC ---
-  // 1. Determine if the image format is likely transparent.
   const isPngOrTransparent = imageType === "PNG" || src?.toLowerCase().endsWith(".png");
-  // 2. The pattern should only show if it's a PNG AND we are NOT in a gallery context.
   const showPattern = isPngOrTransparent && !isGallery;
 
   const [resolution, setResolution] = useState<string>("");
 
-  // --- MORE EFFICIENT RESOLUTION HANDLING ---
-  // We use the onLoadingComplete callback from Next/Image, which is much more
-  // performant than creating a new `<img>` element manually.
-  // This avoids a second network request for the same image.
   const handleLoadingComplete = (img: HTMLImageElement) => {
     if (showResolution) {
       setResolution(`${img.naturalWidth} × ${img.naturalHeight}`);
@@ -170,12 +161,17 @@ export function ImageWithPattern({
     e.preventDefault();
   };
 
+  // Safety check: if not in fill mode, we must have width and height to prevent layout errors.
+  if (!fill && (!width || !height)) {
+    // Render a placeholder with a pulse animation to indicate loading or an error.
+    return <div className={cn("relative overflow-hidden bg-gray-800 animate-pulse w-full aspect-video", className)} />;
+  }
+
   return (
     <div
       className={cn("relative overflow-hidden", className)}
       onContextMenu={handleContextMenu}
     >
-      {/* Simple checkered background for transparent images */}
       {showPattern && (
         <div className="absolute inset-0 bg-[#f8f8f8]">
           <div
@@ -194,14 +190,6 @@ export function ImageWithPattern({
         </div>
       )}
 
-      {/* 
-        The actual image.
-        --- CRITICAL PERFORMANCE FIX ---
-        We removed `unoptimized={true}`. The component is now structured so the
-        Next/Image (with transparency) sits on top of the pattern div. 
-        This allows Next.js to fully optimize the image (e.g., to WebP) 
-        while still achieving the desired visual effect.
-      */}
       <Image
         src={src}
         alt={alt}
@@ -209,9 +197,12 @@ export function ImageWithPattern({
         width={!fill ? width : undefined}
         height={!fill ? height : undefined}
         className={cn(
-          `object-${objectFit}`, // Use the objectFit prop
-          "relative z-10",       // Ensure the image is on top of the pattern
-          imageClassName         // Apply any extra classes for the image itself
+          // This applies the responsive classes when NOT in fill mode
+          !fill && "h-auto w-full",
+          // This applies the object-fit property when in fill mode
+          fill && `object-${objectFit}`,
+          "relative z-10",
+          imageClassName
         )}
         sizes={sizes}
         priority={priority}
@@ -220,11 +211,11 @@ export function ImageWithPattern({
         {...props}
       />
 
-      {/* {showResolution && resolution && (
+      {showResolution && resolution && (
         <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-md z-20">
           {resolution}
         </div>
-      )} */}
+      )}
     </div>
   );
 }

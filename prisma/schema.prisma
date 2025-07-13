@@ -111,6 +111,9 @@ model InitialUpload {
   license           License      @default(STANDARD)
   imageType         String?
   aiGeneratedStatus String?      @default("NOT_AI_GENERATED")
+width             Int?
+  height            Int?
+
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 }
@@ -123,6 +126,9 @@ model ContributorItem {
   description String?
   imageUrl    String
   previewUrl  String
+  
+   width       Int?
+  height      Int ?
   status      ContributorItemStatus @default(PENDING)
   license     License
   tags        String[]
@@ -142,6 +148,8 @@ model ContributorItem {
   userDownloads Download[]
   savedBy     SavedItem[]
   
+
+
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
 }

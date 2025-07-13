@@ -128,33 +128,24 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
           <div className="lg:col-span-2 space-y-8">
             {/* Main Image Display */}
             <div className="rounded-xl overflow-hidden bg-gray-900/60 border border-gray-800/50 shadow-lg">
-              <div className="relative">
-                {/* Download Count Badge */}
-                <div className="absolute top-4 right-4 z-10 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center">
-                  <Download className="w-3.5 h-3.5 mr-1.5" />
-                  <span>{image.downloads || 0} downloads</span>
-                </div>
-
-                {/* AI Badge if applicable */}
+              {/* This container will now grow/shrink with the image inside it */}
+              <div className="relative w-full">
                 {isAiGenerated && (
-                  <div className="absolute top-4 left-4 z-10 bg-purple-600/80 text-white text-xs py-1 px-3 rounded-full">
+                  <div className="absolute top-4 left-4 z-20 bg-purple-600/80 text-white text-xs py-1 px-3 rounded-full">
                     AI Generated
                   </div>
                 )}
-
-                {/* Main Image */}
-                <div className="aspect-[4/3] flex items-center justify-center relative">
-                  <ImageWithPattern
-                    src={image.previewUrl || image.imageUrl}
-                    alt={image.title}
-                    fill
-                    priority
-                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 60vw, 50vw"
-                    className="object-contain h-full w-full"
-                    imageType={imageType}
-                    showResolution={true}
-                  />
-                </div>
+                <ImageWithPattern
+                  src={image.previewUrl || image.imageUrl}
+                  alt={image.title}
+                  priority
+                  imageType={imageType}
+                  showResolution={true}
+                  width={image.width}
+                  height={image.height}
+                  // These classes make the image responsive while maintaining aspect ratio
+                  imageClassName="w-full h-auto"
+                />
               </div>
             </div>
 
@@ -175,14 +166,14 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     <Link
                       key={item.id}
                       href={`/gallery/${item.id}`}
-                      className="group block relative hover:opacity-95 transition-all duration-300"
+                      className="group block relative hover:opacity-95 transition-all duration-300 aspect-square"
                     >
                       <Image
-                        src={item.imageUrl}
+                        src={item.previewUrl || item.imageUrl}
                         alt={item.title}
-                        width={400}
-                        height={300}
-                        className="w-full h-auto rounded-lg transform group-hover:scale-105 transition-transform duration-500"
+                        fill
+                        sizes="(max-width: 768px) 50vw, 25vw"
+                        className="w-full h-full object-cover rounded-lg transform group-hover:scale-105 transition-transform duration-500"
                       />
                     </Link>
                   ))}
@@ -289,7 +280,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     This resource can be used for personal and commercial projects with attribution.
                   </p>
                   <p>
-                    &copy; {new Date().getFullYear()} {image.user.name || 'Creator'} / KlickStock
+                    © {new Date().getFullYear()} {image.user.name || 'Creator'} / KlickStock
                   </p>
                 </div>
               </div>
@@ -307,19 +298,19 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     View all <ChevronRight className="w-4 h-4 ml-1" />
                   </Link>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 auto-rows-auto">
+                <div className="grid grid-cols-2 gap-4">
                   {relatedImages.map((item) => (
                     <Link
                       key={item.id}
                       href={`/gallery/${item.id}`}
-                      className="group block relative hover:opacity-95 transition-all"
+                      className="group block relative hover:opacity-95 transition-all aspect-square"
                     >
                       <Image
-                        src={item.imageUrl}
+                        src={item.previewUrl || item.imageUrl}
                         alt={item.title}
-                        width={300}
-                        height={225}
-                        className="w-full h-auto rounded-lg transform group-hover:scale-105 transition-transform duration-500"
+                        fill
+                        sizes="(max-width: 768px) 50vw, (max-width: 1024px) 25vw, 15vw"
+                        className="w-full h-full object-cover rounded-lg transform group-hover:scale-105 transition-transform duration-500"
                       />
                     </Link>
                   ))}

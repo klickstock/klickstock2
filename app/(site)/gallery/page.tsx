@@ -317,9 +317,6 @@ export default async function GalleryPage({
                   >
                     <div className="bg-gray-900/60 rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-gray-800/50 hover:border-indigo-500/50 relative">
                       <div className="relative w-full">
-                        {/* ====================================================================== */}
-                        {/* ======================= THE CRITICAL CHANGE HERE ======================= */}
-                        {/* ====================================================================== */}
                         <ImageWithPattern
                           src={item.previewUrl}
                           alt={item.title}
@@ -327,7 +324,6 @@ export default async function GalleryPage({
                           height={800}
                           className="w-full transition-transform duration-500 group-hover:scale-110"
                           imageType={getImageType(item)}
-                          isGallery={true}
                         />
                       </div>
                       {isAiGenerated(item) && (

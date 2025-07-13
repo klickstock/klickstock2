@@ -2,26 +2,23 @@
 
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
-// NEW: Add status and progress to the file interface
 export interface UploadFile {
-  // --- Core initial upload data ---
   id: string;
   previewUrl: string;
   originalFileName: string;
-  // --- Metadata for submission ---
   title: string;
   description: string;
   tags: string[];
-  license: string;
-  category: string;
-  imageType: string;
-  aiGeneratedStatus: string;
-  // --- NEW: Fields for tracking upload state ---
-  // A temporary ID used during the upload process before a DB id is available
+  license: 'STANDARD' | 'EXTENDED';
+  category: string; // `string` is okay here as categories can be dynamic
+  imageType: 'JPG' | 'PNG';
+  aiGeneratedStatus: 'NOT_AI_GENERATED' | 'AI_GENERATED';
   tempId?: string;
-  status?: 'uploading' | 'processing' | 'failed' | 'complete';
+  status?: 'uploading' | 'processing' | 'error' | 'complete';
   progress?: number; // Progress from 0 to 100
   error?: string | null; // Error message for a specific file
+  width: number | null;
+  height: number | null;
 }
 
 interface UploadState {
