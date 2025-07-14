@@ -306,7 +306,7 @@ export default async function PngsPage({
                         {/* ======================= THE CRITICAL CHANGE HERE ======================= */}
                         {/* ====================================================================== */}
                         <ImageWithPattern
-                          src={item.previewUrl}
+                          src={item.cleanPreviewUrl || item.imageUrl}
                           alt={item.title}
                           width={800}
                           height={800}

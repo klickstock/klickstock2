@@ -4,6 +4,7 @@ import Link from "next/link";
 import { db } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import dynamic from "next/dynamic";
+import { ImageWithPattern } from "@/components/ui/image-with-pattern";
 
 // Dynamically import the carousel
 const SimpleCarousel = dynamic(() => import("../../components/site/SimpleCarousel"), {
@@ -126,16 +127,13 @@ export default async function HomePage() {
                       <Link href={`/gallery/${item.id}`} className="block relative overflow-hidden">
                         <div className={`${aspectRatio} w-full relative`}>
                           {item.imageType?.toUpperCase() === 'PNG' && <div className="absolute inset-0 bg-[url('/transparent-checkerboard.svg')] bg-repeat bg-[length:20px_20px] opacity-10"></div>}
-
-                          {/* --- FIX 1: REMOVED unoptimized={true} for better performance --- */}
-                          <Image
-                            src={item.previewUrl || item.imageUrl}
+                          <ImageWithPattern
+                            src={item.cleanPreviewUrl}
                             alt={item.title}
                             fill
-                            sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
                             className="object-cover transform group-hover:scale-110 transition-transform duration-700 ease-out"
+                            imageType={"PNG"} sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
                           />
-
                           <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent opacity-0 group-hover:opacity-80 transition-opacity duration-300" />
                           {item.imageType && <div className={`absolute top-2 left-2 ${item.imageType.toUpperCase() === 'PNG' ? 'bg-indigo-900/70 text-indigo-300' : 'bg-gray-900/70 text-gray-300'} text-xs py-0.5 px-2 rounded-md backdrop-blur-sm flex items-center gap-1`}>{item.imageType.toUpperCase() === 'PNG' && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16M4 12h16M4 19h16" /></svg>}{item.imageType}</div>}
                           <div className="absolute bottom-3 right-3 bg-indigo-600 rounded-full p-2 shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0 hover:bg-indigo-500"><Download className="w-4 h-4 text-white" /></div>

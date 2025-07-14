@@ -99,11 +99,13 @@ model InitialUpload {
   fileSize          Int
   mimeType          String
   s3Key             String       @unique
-  previewS3Key      String       @unique
+  previewS3Key      String       @unique // Watermarked
+  cleanPreviewS3Key String?       @unique // NEW: Non-watermarked
   status            UploadStatus @default(UPLOADED)
   userId            String
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   contributorItemId String?      @unique
+  // Fields for storing metadata before submission
   title             String?
   description       String?
   tags              String[]     @default([])
@@ -111,49 +113,47 @@ model InitialUpload {
   license           License      @default(STANDARD)
   imageType         String?
   aiGeneratedStatus String?      @default("NOT_AI_GENERATED")
-width             Int?
-  height            Int?
+  width             Int ?
+  height            Int ?
 
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 }
 
-
-
 model ContributorItem {
-  id          String               @id @default(cuid())
-  title       String
-  description String?
-  imageUrl    String
-  previewUrl  String
-  
-   width       Int?
-  height      Int ?
-  status      ContributorItemStatus @default(PENDING)
-  license     License
-  tags        String[]
-  category    String
-  imageType   String
+  id                String               @id @default(cuid())
+  title             String
+  description       String?
+ imageUrl          String // Original file
+  previewUrl        String // Watermarked preview
+  cleanPreviewUrl   String? // NEW: Non-watermarked preview
+
+  width             Int?
+  height            Int?
+  status            ContributorItemStatus @default(PENDING)
+  license           License
+  tags              String[]
+  category          String
+  imageType         String
   aiGeneratedStatus String
-  downloads   Int                  @default(0)
-  views       Int                  @default(0)
-  
-  userId      String
-  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  reviewerId  String?
-  reviewNote  String?
-  reviewedAt  DateTime?
-  
-  userDownloads Download[]
-  savedBy     SavedItem[]
-  
+  downloads         Int                  @default(0)
+  views             Int                  @default(0)
 
+  userId            String
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  reviewerId        String?
+  reviewNote        String?
+  reviewedAt        DateTime?
+
+  userDownloads     Download[]
+  savedBy           SavedItem[]
+
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 }
 
+// ... your other models (User, Download, etc.) remain the same
 model Download {
   id                String     @id @default(cuid())
   userId            String

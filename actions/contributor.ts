@@ -9,8 +9,10 @@ import { uploadImageToS3, deleteImageFromS3, getSignedReadUrl, deleteMultipleIma
 import { hasContributorAccess } from "@/lib/permissions";
 import { ContributorItemStatus, InitialUpload } from "@prisma/client";
 import { revalidatePath } from "next/cache";
-import { generatePreviewWithWatermarkSafe } from "@/lib/image-processing";
-import { sanitizeFileName, getPreviewFileName } from "@/lib/file-utils";
+// NEW: Import both processing functions
+import { generatePreviewWithWatermarkSafe, generateCleanPreviewSafe } from "@/lib/image-processing";
+// NEW: Import both filename utilities
+import { sanitizeFileName, getPreviewFileName, getCleanPreviewFileName } from "@/lib/file-utils";
 import { UploadFile } from "@/redux/features/uploadSlice";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import sharp from "sharp";
@@ -24,56 +26,61 @@ import sharp from "sharp";
  */
 export async function handleInitialUploads(formData: FormData): Promise<{ success: boolean; count: number }> {
   const session = await auth();
-  if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
-  if (!(await hasContributorAccess())) throw new Error("You don't have permission to upload content.");
+  if (!session?.user?.id) throw new Error("Not authenticated.");
+  if (!(await hasContributorAccess())) throw new Error("Permission denied.");
 
   const files = formData.getAll("files") as File[];
-  if (!files || files.length === 0) throw new Error("No files were provided for upload.");
+  if (!files || files.length === 0) throw new Error("No files provided.");
 
   const userId = session.user.id;
-
-  // BEST PRACTICE: Verify user exists before proceeding
   const user = await db.user.findUnique({ where: { id: userId } });
-  if (!user) {
-    throw new Error("User associated with this session not found. Please log out and log back in.");
-  }
+  if (!user) throw new Error("User not found.");
 
   const folderName = `freepik-contributors/${userId}`;
   const maxSize = 50 * 1024 * 1024; // 50MB
 
   try {
-    // 1. Process all file uploads to S3 in parallel
     const s3Uploads = await Promise.all(
       files.map(async (file) => {
-        if (file.size > maxSize) throw new Error(`File "${file.name}" exceeds the 50MB size limit.`);
-        if (!file.type.startsWith("image/")) throw new Error(`File "${file.name}" is not a valid image type.`);
+        if (file.size > maxSize) throw new Error(`File "${file.name}" exceeds 50MB.`);
+        if (!file.type.startsWith("image/")) throw new Error(`File "${file.name}" is not an image.`);
 
         const originalBuffer = await bufferizeFile(file);
 
-        const previewResult = await generatePreviewWithWatermarkSafe(originalBuffer);
-        if (!previewResult) {
-          throw new Error(`Failed to generate preview for "${file.name}".`);
-        }
-        const { buffer: previewBuffer, width, height } = previewResult;
+        // 1. Generate BOTH previews in parallel
+        const [watermarkedResult, cleanResult] = await Promise.all([
+          generatePreviewWithWatermarkSafe(originalBuffer),
+          generateCleanPreviewSafe(originalBuffer),
+        ]);
+
+        if (!watermarkedResult) throw new Error(`Failed to generate watermarked preview for "${file.name}".`);
+        if (!cleanResult) throw new Error(`Failed to generate clean preview for "${file.name}".`);
+
+        const { buffer: previewBuffer, width, height } = watermarkedResult;
+        const { buffer: cleanPreviewBuffer } = cleanResult;
 
         const sanitizedFileName = sanitizeFileName(file.name);
         const previewFileName = getPreviewFileName(file.name);
+        const cleanPreviewFileName = getCleanPreviewFileName(file.name);
 
-        // Store previews in a dedicated subfolder for better organization
-        const previewFolderName = `${folderName}/previews`;
+        const previewFolderName = `${folderName}/previews-watermarked`;
+        const cleanPreviewFolderName = `${folderName}/previews-clean`;
 
-        const [originalUpload, previewUpload] = await Promise.all([
+        // 2. Upload ALL THREE files to S3 in parallel
+        const [originalUpload, previewUpload, cleanPreviewUpload] = await Promise.all([
           uploadImageToS3(originalBuffer, folderName, sanitizedFileName),
           uploadImageToS3(previewBuffer, previewFolderName, previewFileName),
+          uploadImageToS3(cleanPreviewBuffer, cleanPreviewFolderName, cleanPreviewFileName),
         ]);
 
-        // Return the data needed for the database record
+        // 3. Return data for the database record
         return {
           originalFileName: file.name,
           fileSize: file.size,
           mimeType: file.type,
           s3Key: originalUpload.key,
           previewS3Key: previewUpload.key,
+          cleanPreviewS3Key: cleanPreviewUpload.key, // NEW
           userId,
           width,
           height,
@@ -81,8 +88,6 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
       })
     );
 
-    // 2. Insert all records into the database in a single, efficient query.
-    // This avoids opening many parallel connections, which was the likely cause of your database error.
     const result = await db.initialUpload.createMany({
       data: s3Uploads,
     });
@@ -92,8 +97,6 @@ export async function handleInitialUploads(formData: FormData): Promise<{ succes
 
   } catch (error: any) {
     console.error("Initial upload error:", error);
-    // In a real-world scenario, you might want to add logic here to delete
-    // the files that were successfully uploaded to S3 before the error occurred.
     throw new Error(error.message || "An unexpected error occurred during file upload.");
   }
 }
@@ -201,60 +204,52 @@ export async function finalizeUpload(fileData: FinalizeUploadRequest): Promise<I
 
   const { s3Key, originalFileName, fileSize, mimeType } = fileData;
   const userId = session.user.id;
+  const folderName = `freepik-contributors/${userId}`;
 
   try {
-    // BEST PRACTICE: Verify user exists before proceeding
     const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      throw new Error("User associated with this session not found. Please log out and log back in.");
-    }
+    if (!user) throw new Error("User not found.");
 
-    const folderName = `freepik-contributors/${userId}`;
-
-    // A. Fetch the just-uploaded original file from S3
     const s3Client = new S3Client({ region: process.env.AWS_REGION });
-    const getObjectCommand = new GetObjectCommand({
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: s3Key,
-    });
-    const { Body } = await s3Client.send(getObjectCommand);
+    const { Body } = await s3Client.send(new GetObjectCommand({ Bucket: process.env.AWS_BUCKET_NAME, Key: s3Key }));
     if (!Body) throw new Error(`Could not retrieve uploaded file from S3: ${s3Key}`);
     const originalBuffer = Buffer.from(await Body.transformToByteArray());
 
-    // B. Generate watermarked preview and get dimensions
-    const previewResult = await generatePreviewWithWatermarkSafe(originalBuffer);
-    if (!previewResult) {
-      throw new Error(`Failed to generate preview for "${originalFileName}".`);
-    }
-    const { buffer: previewBuffer, width, height } = previewResult;
+    // 1. Generate BOTH previews
+    const [watermarkedResult, cleanResult] = await Promise.all([
+      generatePreviewWithWatermarkSafe(originalBuffer),
+      generateCleanPreviewSafe(originalBuffer)
+    ]);
+    if (!watermarkedResult) throw new Error(`Failed watermarked preview for "${originalFileName}".`);
+    if (!cleanResult) throw new Error(`Failed clean preview for "${originalFileName}".`);
 
-    // C. Upload the preview file to S3 in its own folder
-    const previewFolderName = `${folderName}/previews`;
+    const { buffer: previewBuffer, width, height } = watermarkedResult;
+    const { buffer: cleanPreviewBuffer } = cleanResult;
+
+    // 2. Upload BOTH previews
     const previewFileName = getPreviewFileName(originalFileName);
-    const { key: previewS3Key } = await uploadImageToS3(previewBuffer, previewFolderName, previewFileName);
+    const cleanPreviewFileName = getCleanPreviewFileName(originalFileName);
+    const [previewUpload, cleanPreviewUpload] = await Promise.all([
+      uploadImageToS3(previewBuffer, `${folderName}/previews-watermarked`, previewFileName),
+      uploadImageToS3(cleanPreviewBuffer, `${folderName}/previews-clean`, cleanPreviewFileName)
+    ]);
 
-    // D. Create the database record
+    // 3. Create the database record
     const newUploadRecord = await db.initialUpload.create({
       data: {
-        userId,
-        s3Key,
-        previewS3Key,
-        originalFileName,
-        fileSize,
-        mimeType,
-        width, // Save dimensions
-        height,
+        userId, s3Key,
+        previewS3Key: previewUpload.key,
+        cleanPreviewS3Key: cleanPreviewUpload.key, // NEW
+        originalFileName, fileSize, mimeType, width, height,
       }
     });
 
     revalidatePath('/contributor/upload');
     return newUploadRecord;
-
   } catch (error: any) {
     console.error("Error finalizing upload:", error);
-    // Attempt to clean up the original file if finalization fails
     await deleteImageFromS3(s3Key).catch(cleanupError => console.error("Cleanup failed for", s3Key, cleanupError));
-    throw new Error(error.message || "An unexpected error occurred while processing the file.");
+    throw new Error(error.message || "An unexpected error occurred.");
   }
 }
 /**
@@ -263,66 +258,52 @@ export async function finalizeUpload(fileData: FinalizeUploadRequest): Promise<I
  */
 export async function deleteAllInitialUploads(fileIds: string[]): Promise<{ count: number }> {
   const session = await auth();
-  if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
-
-  if (!fileIds || fileIds.length === 0) {
-    return { count: 0 };
-  }
+  if (!session?.user?.id) throw new Error("Not authenticated.");
+  if (!fileIds || fileIds.length === 0) return { count: 0 };
 
   try {
     const uploadsToDelete = await db.initialUpload.findMany({
-      where: {
-        id: { in: fileIds },
-        userId: session.user.id,
-        contributorItemId: null,
-      },
-      select: { id: true, s3Key: true, previewS3Key: true },
+      where: { id: { in: fileIds }, userId: session.user.id, contributorItemId: null },
+      // CHANGE: Select all three keys for deletion
+      select: { id: true, s3Key: true, previewS3Key: true, cleanPreviewS3Key: true },
     });
 
     if (uploadsToDelete.length === 0) return { count: 0 };
 
-    const s3Keys = uploadsToDelete.flatMap(upload => [upload.s3Key, upload.previewS3Key]);
+    // CHANGE: Collect all three S3 keys from each record
+    const s3Keys = uploadsToDelete.flatMap(upload => [upload.s3Key, upload.previewS3Key, upload.cleanPreviewS3Key]);
     const validIdsToDelete = uploadsToDelete.map(upload => upload.id);
 
     await Promise.all([
       deleteMultipleImagesFromS3(s3Keys),
-      db.initialUpload.deleteMany({
-        where: { id: { in: validIdsToDelete } },
-      }),
+      db.initialUpload.deleteMany({ where: { id: { in: validIdsToDelete } } }),
     ]);
 
     revalidatePath('/contributor/upload');
     return { count: uploadsToDelete.length };
-
   } catch (error: any) {
-    console.error("Bulk delete initial uploads error:", error);
-    throw new Error(error.message || "Failed to delete all selected uploads.");
+    console.error("Bulk delete error:", error);
+    throw new Error(error.message || "Failed to delete uploads.");
   }
 }
 
-/**
- * Deletes a single initial upload record and its corresponding files from S3.
- * This function is for a single item and is correct. No changes needed.
- */
 export async function deleteInitialUpload(id: string): Promise<{ success: boolean }> {
   const session = await auth();
-  if (!session?.user?.id) throw new Error("Not authenticated. Please log in.");
+  if (!session?.user?.id) throw new Error("Not authenticated.");
 
   const uploadToDelete = await db.initialUpload.findUnique({ where: { id, userId: session.user.id } });
-
-  if (!uploadToDelete) {
-    throw new Error("Upload not found or you don't have permission to delete it.");
-  }
-  if (uploadToDelete.contributorItemId) {
-    throw new Error("Cannot delete an upload that has already been submitted.");
-  }
+  if (!uploadToDelete) throw new Error("Upload not found or permission denied.");
+  if (uploadToDelete.contributorItemId) throw new Error("Cannot delete a submitted upload.");
 
   try {
+    // CHANGE: Delete all three associated files from S3
     await Promise.all([
       deleteImageFromS3(uploadToDelete.s3Key),
-      deleteImageFromS3(uploadToDelete.previewS3Key)
+      deleteImageFromS3(uploadToDelete.previewS3Key),
+      deleteImageFromS3(uploadToDelete.cleanPreviewS3Key)
     ]);
-    await db.initialUpload.delete({ where: { id: uploadToDelete.id } }); // Use a more secure where clause
+    await db.initialUpload.delete({ where: { id: uploadToDelete.id } });
+
     revalidatePath('/contributor/upload');
     return { success: true };
   } catch (error: any) {
@@ -343,66 +324,53 @@ export async function createContributorItemsFromUploads(itemsToSubmit: Omit<Uplo
   const userId = session.user.id;
   let successfulCount = 0;
 
-  // 1. Fetch all valid initial uploads in one go (Your excellent optimization)
   const itemIds = itemsToSubmit.map(item => item.id);
   const initialUploads = await db.initialUpload.findMany({
     where: { id: { in: itemIds }, userId, contributorItemId: null },
   });
   const validUploadsMap = new Map(initialUploads.map(up => [up.id, up]));
 
-  // --- THIS IS THE KEY CHANGE ---
-  // We loop through each item and give it its own transaction.
   for (const item of itemsToSubmit) {
     const initialUpload = validUploadsMap.get(item.id);
-
-    // Skip if the upload isn't valid (already submitted, not found, missing dimensions, etc.)
-    if (!initialUpload || initialUpload.width == null || initialUpload.height == null) {
-      console.warn(`Skipping item ${item.id}: Not found, missing dimensions, already submitted, or permission denied.`);
+    if (!initialUpload || !initialUpload.width || !initialUpload.height) {
+      console.warn(`Skipping item ${item.id}: Invalid or already submitted.`);
       continue;
     }
 
     try {
-      // 2. Start a small, fast transaction for just this single item.
       await db.$transaction(async (tx) => {
         const bucket = process.env.AWS_BUCKET_NAME!;
         const region = process.env.AWS_REGION!;
 
-        // 3. Create the ContributorItem
         const newContributorItem = await tx.contributorItem.create({
           data: {
+            // ... other item data
             title: item.title, description: item.description, tags: item.tags,
-            category: item.category,
-            license: item.license, // Use the stricter type from Redux
-            imageType: item.imageType,
-            aiGeneratedStatus: item.aiGeneratedStatus,
+            category: item.category, license: item.license,
+            imageType: item.imageType, aiGeneratedStatus: item.aiGeneratedStatus,
             status: saveAsDraft ? ContributorItemStatus.DRAFT : ContributorItemStatus.PENDING,
             userId,
-            imageUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.s3Key}`,
-            previewUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.previewS3Key}`,
             width: initialUpload.width,
             height: initialUpload.height,
+            // Construct all three URLs
+            imageUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.s3Key}`,
+            previewUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.previewS3Key}`,
+            // NEW: Add the clean preview URL
+            cleanPreviewUrl: `https://${bucket}.s3.${region}.amazonaws.com/${initialUpload.cleanPreviewS3Key}`,
           }
         });
 
-        // 4. Link the InitialUpload to the new ContributorItem.
-        // This prevents it from being submitted again.
         await tx.initialUpload.update({
           where: { id: initialUpload.id },
           data: { contributorItemId: newContributorItem.id },
         });
       });
-
-      // 5. If the transaction succeeds, increment our counter.
       successfulCount++;
-
     } catch (error) {
-      // 6. If this specific item fails, log the error and continue to the next one.
-      console.error(`Failed to process and submit item ${item.id} (${item.title}). Error:`, error);
-      // The overall process does not stop.
+      console.error(`Failed to submit item ${item.id}:`, error);
     }
   }
 
-  // 7. Revalidate paths and return the count of successfully processed items.
   if (successfulCount > 0) {
     revalidatePath('/contributor/upload');
     revalidatePath('/contributor/drafts');
@@ -411,7 +379,6 @@ export async function createContributorItemsFromUploads(itemsToSubmit: Omit<Uplo
 
   return { success: true, count: successfulCount };
 }
-
 // ===================================================================
 // ORIGINAL FUNCTIONS (NOW FIXED)
 // ===================================================================
@@ -422,20 +389,17 @@ export async function uploadImageToServer(formData: FormData, saveDraft: boolean
   const hasAccess = await hasContributorAccess();
 
   if (!session || !session.user) throw new Error("Not authenticated. Please log in.");
-  if (!hasAccess) throw new Error("You don't have permission to upload content. Please contact an administrator.");
+  if (!hasAccess) throw new Error("You don't have permission to upload content.");
   if (!session.user.id) throw new Error("User ID not found in session");
 
-  // Get form data
+  // Get form data (no change here)
   const file = formData.get("file") as File;
-  const previewFile = formData.get("preview") as File; // Get the preview file
   const title = formData.get("title") as string;
   const description = formData.get("description") as string;
   const license = formData.get("license") as string || "STANDARD";
   const category = formData.get("category") as string;
   const imageType = formData.get("imageType") as string || "JPG";
   const aiGeneratedStatus = formData.get("aiGeneratedStatus") as string || "NOT_AI_GENERATED";
-
-  // Extract tags
   const tags: string[] = [];
   formData.getAll("keywords[]").forEach((tag) => {
     if (typeof tag === "string" && tag.trim()) {
@@ -443,41 +407,72 @@ export async function uploadImageToServer(formData: FormData, saveDraft: boolean
     }
   });
 
-  if (!file || !title || !previewFile) throw new Error("Missing required fields");
+  // NOTE: The separate 'previewFile' is no longer needed, as we generate previews from the original.
+  if (!file || !title) throw new Error("Missing required fields");
 
   try {
     const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) throw new Error(`File size exceeds the maximum allowed size of ${maxSize / (1024 * 1024)}MB`);
+    if (file.size > maxSize) throw new Error(`File size exceeds ${maxSize / (1024 * 1024)}MB`);
     if (!file.type.startsWith("image/")) throw new Error("Only image files are allowed");
 
-    const buffer = await bufferizeFile(file);
-    const previewBuffer = await bufferizeFile(previewFile);
+    const originalBuffer = await bufferizeFile(file);
 
-    // Get image dimensions from the buffer
-    const { width, height } = await sharp(buffer).metadata();
+    // CHANGE 1: Generate BOTH previews from the original buffer
+    const [watermarkedResult, cleanResult] = await Promise.all([
+      generatePreviewWithWatermarkSafe(originalBuffer),
+      generateCleanPreviewSafe(originalBuffer),
+    ]);
+
+    if (!watermarkedResult) throw new Error("Failed to generate watermarked preview.");
+    if (!cleanResult) throw new Error("Failed to generate clean preview.");
+
+    const { buffer: previewBuffer, width, height } = watermarkedResult;
+    const { buffer: cleanPreviewBuffer } = cleanResult;
+
     if (!width || !height) {
       throw new Error("Could not determine image dimensions.");
     }
 
+    // CHANGE 2: Get filenames for all three files
     const sanitizedFileName = sanitizeFileName(file.name);
     const previewFileName = getPreviewFileName(file.name);
+    const cleanPreviewFileName = getCleanPreviewFileName(file.name); // NEW
 
     const folderName = `freepik-contributors/${session.user.id}`;
-    // Note: uploadImageToS3 now returns { url, key }
-    const { url: imageUrl } = await uploadImageToS3(buffer, folderName, sanitizedFileName);
-    const { url: previewUrl } = await uploadImageToS3(previewBuffer, folderName, previewFileName);
+    const previewFolderName = `${folderName}/previews-watermarked`;
+    const cleanPreviewFolderName = `${folderName}/previews-clean`;
 
-    if (!imageUrl || !previewUrl) throw new Error("Failed to upload images to S3");
+    // CHANGE 3: Upload all three files to S3 and get their URLs
+    const [originalUpload, previewUpload, cleanPreviewUpload] = await Promise.all([
+      uploadImageToS3(originalBuffer, folderName, sanitizedFileName),
+      uploadImageToS3(previewBuffer, previewFolderName, previewFileName),
+      uploadImageToS3(cleanPreviewBuffer, cleanPreviewFolderName, cleanPreviewFileName),
+    ]);
 
+    const { url: imageUrl } = originalUpload;
+    const { url: previewUrl } = previewUpload;
+    const { url: cleanPreviewUrl } = cleanPreviewUpload; // NEW
+
+    if (!imageUrl || !previewUrl || !cleanPreviewUrl) {
+      throw new Error("Failed to upload one or more images to S3");
+    }
+
+    // CHANGE 4: Add the 'cleanPreviewUrl' to the create data. THIS FIXES THE ERROR.
     const item = await db.contributorItem.create({
       data: {
-        title, description, imageUrl, previewUrl,
+        title,
+        description,
+        imageUrl,
+        previewUrl,
+        cleanPreviewUrl, // The missing piece that solves the TypeScript error
         width,
         height,
         status: saveDraft ? ContributorItemStatus.DRAFT : ContributorItemStatus.PENDING,
         userId: session.user.id,
         license: license === "EXTENDED" ? "EXTENDED" : "STANDARD",
-        tags, category: category || "", imageType: imageType || "JPG",
+        tags,
+        category: category || "",
+        imageType: imageType || "JPG",
         aiGeneratedStatus: aiGeneratedStatus || "NOT_AI_GENERATED"
       }
     });
@@ -488,7 +483,6 @@ export async function uploadImageToServer(formData: FormData, saveDraft: boolean
     throw new Error(error.message || "Failed to upload image");
   }
 }
-
 export async function submitDraftForReview(itemId: string) {
   const session = await auth();
   if (!session || !session.user) throw new Error("Not authenticated. Please log in.");

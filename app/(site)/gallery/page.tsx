@@ -168,6 +168,7 @@ export default async function GalleryPage({
 
   // Safe display of imageType and aiGeneratedStatus, accounting for potentially older records
   const getImageType = (item: ItemWithUser) => {
+    // console.log('item.imageType :>> ', item.imageType);
     return item.imageType || 'JPG';
   };
 
@@ -318,7 +319,7 @@ export default async function GalleryPage({
                     <div className="bg-gray-900/60 rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-gray-800/50 hover:border-indigo-500/50 relative">
                       <div className="relative w-full">
                         <ImageWithPattern
-                          src={item.previewUrl}
+                          src={item.cleanPreviewUrl}
                           alt={item.title}
                           width={800}
                           height={800}

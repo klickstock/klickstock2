@@ -4,13 +4,16 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
 export interface UploadFile {
   id: string;
+  /** URL for the watermarked preview, used in the contributor upload/drafts area. */
   previewUrl: string;
+  /** NEW: Optional URL for the non-watermarked preview, for use in public galleries or detail pages. */
+  cleanPreviewUrl?: string;
   originalFileName: string;
   title: string;
   description: string;
   tags: string[];
   license: 'STANDARD' | 'EXTENDED';
-  category: string; // `string` is okay here as categories can be dynamic
+  category: string;
   imageType: 'JPG' | 'PNG';
   aiGeneratedStatus: 'NOT_AI_GENERATED' | 'AI_GENERATED';
   tempId?: string;
@@ -35,16 +38,16 @@ const initialState: UploadState = {
   success: null,
 };
 
+// No changes are needed to the slice or its reducers. They will handle
+// the new optional `cleanPreviewUrl` property automatically.
 export const uploadSlice = createSlice({
   name: 'upload',
   initialState,
   reducers: {
-    // NEW: Adds files to the queue before upload starts
     addFilesToQueue: (state, action: PayloadAction<UploadFile[]>) => {
       state.files.unshift(...action.payload);
       state.isUploading = true;
     },
-    // NEW: Updates a file's progress and status using a temporary ID
     updateFileUploadState: (state, action: PayloadAction<{ tempId: string, data: Partial<UploadFile> }>) => {
       const { tempId, data } = action.payload;
       const fileIndex = state.files.findIndex(f => f.tempId === tempId);
@@ -52,12 +55,9 @@ export const uploadSlice = createSlice({
         state.files[fileIndex] = { ...state.files[fileIndex], ...data };
       }
     },
-    // Replaces the entire file list, useful after fetching from server
     setFiles: (state, action: PayloadAction<UploadFile[]>) => {
-      // Add 'complete' status to fetched files
       state.files = action.payload.map(f => ({ ...f, status: 'complete' }));
     },
-    // Updates a specific file's metadata by its DB id
     updateFile: (state, action: PayloadAction<{ index: number, data: Partial<UploadFile> }>) => {
       const { index, data } = action.payload;
       if (index >= 0 && index < state.files.length) {
@@ -72,7 +72,6 @@ export const uploadSlice = createSlice({
         }
       });
     },
-    // Removes a file from the list by its DB id
     removeFileById: (state, action: PayloadAction<string>) => {
       state.files = state.files.filter((file) => file.id !== action.payload);
     },

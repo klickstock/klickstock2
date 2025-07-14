@@ -21,7 +21,7 @@ export function sanitizeFileName(fileName: string): string {
 
   // Add timestamp for uniqueness
   const timestamp = Date.now();
-  
+
   // Combine parts
   return `${sanitizedName}-${timestamp}${ext.toLowerCase()}`;
 }
@@ -32,11 +32,23 @@ export function sanitizeFileName(fileName: string): string {
 export function getPreviewFileName(fileName: string): string {
   const sanitized = sanitizeFileName(fileName);
   const lastDotIndex = sanitized.lastIndexOf('.');
-  
+
   if (lastDotIndex === -1) {
-    return `preview-${sanitized}.jpg`;
+    return `preview-wm-${sanitized}.jpg`;
   }
-  
+
   const name = sanitized.slice(0, lastDotIndex);
-  return `preview-${name}.jpg`; // Always use .jpg for preview
-} 
+  return `preview-wm-${name}.jpg`; // Always use .jpg for preview
+}
+
+export const getCleanPreviewFileName = (fileName: string): string => {
+  const sanitized = sanitizeFileName(fileName);
+  const lastDotIndex = sanitized.lastIndexOf('.');
+
+  if (lastDotIndex === -1) {
+    return `clean-preview-${sanitized}.jpg`;
+  }
+
+  const name = sanitized.slice(0, lastDotIndex);
+  return `clean-preview-${name}.jpg`; // Always use .jpg for preview
+};

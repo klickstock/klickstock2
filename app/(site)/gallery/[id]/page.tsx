@@ -18,6 +18,7 @@ import {
 import { ImageDetailActions } from "@/components/gallery/ImageDetailActions";
 import { Badge } from "@/components/ui/badge";
 import { ImageWithPattern } from "@/components/ui/image-with-pattern";
+import { Prisma } from "@prisma/client";
 
 // Server action to increment view count
 async function incrementViewCount(id: string) {
@@ -30,7 +31,24 @@ async function incrementViewCount(id: string) {
     }
   });
 }
+type ItemWithUser = Prisma.ContributorItemGetPayload<{
+  include: { user: { select: { id: true; name: true; email: true } } }
+}>;
 
+// Safe display of imageType and aiGeneratedStatus, accounting for potentially older records
+const getImageType = (item: ItemWithUser) => {
+  // console.log('item.imageType :>> ', item.imageType);
+  return item.imageType || 'JPG';
+};
+// Type for items that will have user property
+// type ItemWithUser = Prisma.ContributorItemGetPayload<{
+//   include: { user: { select: { id: true; name: true; email: true } } }
+// }>;
+
+// const getImageType = (item: ItemWithUser) => {
+//   // console.log('item.imageType :>> ', item.imageType);
+//   return item.imageType || 'JPG';
+// };
 export default async function ImageDetailPage({ params }: { params: Promise<{ id: string }> }) {
   // Await params before destructuring
   const resolvedParams = await params;
@@ -168,12 +186,13 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                       href={`/gallery/${item.id}`}
                       className="group block relative hover:opacity-95 transition-all duration-300 aspect-square"
                     >
-                      <Image
-                        src={item.previewUrl || item.imageUrl}
+                      <ImageWithPattern
+                        src={item.cleanPreviewUrl}
                         alt={item.title}
-                        fill
-                        sizes="(max-width: 768px) 50vw, 25vw"
-                        className="w-full h-full object-cover rounded-lg transform group-hover:scale-105 transition-transform duration-500"
+                        width={800}
+                        height={800}
+                        className="w-full transition-transform duration-500 group-hover:scale-110 rounded-2xl"
+                        imageType={getImageType(item)}
                       />
                     </Link>
                   ))}
@@ -305,12 +324,14 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                       href={`/gallery/${item.id}`}
                       className="group block relative hover:opacity-95 transition-all aspect-square"
                     >
-                      <Image
-                        src={item.previewUrl || item.imageUrl}
+                      <ImageWithPattern
+                        src={item.cleanPreviewUrl || item.imageUrl}
                         alt={item.title}
-                        fill
                         sizes="(max-width: 768px) 50vw, (max-width: 1024px) 25vw, 15vw"
                         className="w-full h-full object-cover rounded-lg transform group-hover:scale-105 transition-transform duration-500"
+                        imageType={getImageType(item)}
+                        width={300}
+                        height={300}
                       />
                     </Link>
                   ))}
@@ -320,6 +341,6 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }

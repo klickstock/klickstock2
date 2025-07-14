@@ -2,12 +2,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/prisma";
-import { 
-  Download, 
-  Eye, 
-  Search, 
-  Grid, 
-  ArrowLeft, 
+import {
+  Download,
+  Eye,
+  Search,
+  Grid,
+  ArrowLeft,
   CheckCircle2,
   SortAsc,
   ChevronLeft
@@ -22,12 +22,12 @@ const SORT_OPTIONS = [
   { value: "downloads", label: "Most Downloaded" },
 ];
 
-export default async function CreatorProfilePage({ 
+export default async function CreatorProfilePage({
   params,
-  searchParams 
-}: { 
+  searchParams
+}: {
   params: Promise<{ id: string }>,
-  searchParams: Promise<{ 
+  searchParams: Promise<{
     q?: string;
     sort?: string;
   }>
@@ -36,7 +36,7 @@ export default async function CreatorProfilePage({
   const { q, sort } = await searchParams;
   const searchQuery = q || "";
   const sortOption = sort || "popular";
-  
+
   // Fetch the contributor
   const contributor = await db.user.findUnique({
     where: { id },
@@ -56,7 +56,7 @@ export default async function CreatorProfilePage({
       }
     }
   });
-  
+
   // If user not found, return 404
   if (!contributor) {
     notFound();
@@ -76,10 +76,10 @@ export default async function CreatorProfilePage({
 
   const totalDownloads = contributorStats._sum.downloads || 0;
   const totalViews = contributorStats._sum.views || 0;
-  
+
   // Fetch the contributor's approved items
   const approvedItems = await db.contributorItem.findMany({
-    where: { 
+    where: {
       userId: id,
       status: "APPROVED",
       // Title, description, or tags contains search query
@@ -91,20 +91,20 @@ export default async function CreatorProfilePage({
         ]
       } : {})
     },
-    orderBy: sortOption === "newest" 
-      ? [{ createdAt: 'desc' }] 
-      : sortOption === "downloads" 
-        ? [{ downloads: 'desc' }] 
+    orderBy: sortOption === "newest"
+      ? [{ createdAt: 'desc' }]
+      : sortOption === "downloads"
+        ? [{ downloads: 'desc' }]
         : [{ views: 'desc' }, { createdAt: 'desc' }]
   });
 
   // Function to generate sort URL with updated params
   const getSortUrl = (value: string) => {
     const params = new URLSearchParams();
-    
+
     if (searchQuery) params.set('q', searchQuery);
     if (value !== 'popular') params.set('sort', value);
-    
+
     return `/creator/${id}?${params.toString()}`;
   };
 
@@ -115,23 +115,23 @@ export default async function CreatorProfilePage({
 
   // Format the contributor name for display
   const displayName = contributor.name || contributor.email.split('@')[0];
-  
+
   return (
-    
+
     <div className="min-h-screen bg-black text-white">
       {/* Hero section with contributor info */}
-      
+
       <div className="border-b border-gray-800/50 py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Link href="/gallery" className="inline-flex items-center text-sm text-indigo-400 hover:text-indigo-300 mb-6">
             <ChevronLeft className="w-4 h-4 mr-1" /> Back to Gallery
           </Link>
-          
+
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
             {/* Contributor avatar */}
             <div className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-gray-800 overflow-hidden relative flex-shrink-0 border border-gray-700/50 shadow-lg">
               {contributor.image ? (
-                <Image 
+                <Image
                   src={contributor.image}
                   alt={displayName}
                   fill
@@ -143,17 +143,17 @@ export default async function CreatorProfilePage({
                 </div>
               )}
             </div>
-            
+
             {/* Contributor info */}
             <div className="text-center md:text-left">
               <h1 className="text-3xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-500">{displayName}</h1>
-              
+
               {contributor.role === "CONTRIBUTOR" && (
                 <div className="inline-flex items-center mt-1 px-2 py-0.5 bg-indigo-900/30 text-indigo-300 border border-indigo-800/50 rounded-full text-sm">
                   <CheckCircle2 className="w-4 h-4 mr-1" /> Verified Contributor
                 </div>
               )}
-              
+
               <p className="text-gray-400 mt-2">
                 Member since {new Date(contributor.createdAt).toLocaleDateString(undefined, {
                   year: 'numeric',
@@ -161,7 +161,7 @@ export default async function CreatorProfilePage({
                   day: 'numeric'
                 })}
               </p>
-              
+
               <div className="flex flex-wrap gap-6 mt-4">
                 <div className="flex items-center">
                   <Grid className="w-5 h-5 text-indigo-400 mr-2" />
@@ -170,7 +170,7 @@ export default async function CreatorProfilePage({
                     <p className="text-sm text-gray-400">Resources</p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center">
                   <Download className="w-5 h-5 text-green-400 mr-2" />
                   <div>
@@ -178,7 +178,7 @@ export default async function CreatorProfilePage({
                     <p className="text-sm text-gray-400">Downloads</p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center">
                   <Eye className="w-5 h-5 text-blue-400 mr-2" />
                   <div>
@@ -213,7 +213,7 @@ export default async function CreatorProfilePage({
               </button>
             </div>
           </form>
-          
+
           {/* Sort options */}
           <div className="flex flex-wrap items-center">
             <span className="text-sm text-gray-400 mr-3">Sort by:</span>
@@ -222,11 +222,10 @@ export default async function CreatorProfilePage({
                 <Link
                   key={option.value}
                   href={getSortUrl(option.value)}
-                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                    isSortActive(option.value)
-                      ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white'
-                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                  }`}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${isSortActive(option.value)
+                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
                 >
                   {option.label}
                 </Link>
@@ -234,7 +233,7 @@ export default async function CreatorProfilePage({
             </div>
           </div>
         </div>
-        
+
         {/* Results count */}
         <div className="mb-6">
           <p className="text-gray-400">
@@ -242,29 +241,29 @@ export default async function CreatorProfilePage({
             {searchQuery && ` for "${searchQuery}"`}
           </p>
         </div>
-        
+
         {/* Image grid */}
         {approvedItems.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6">
             {approvedItems.map((item) => (
               <div key={item.id} className="group bg-gray-900/60 rounded-xl overflow-hidden shadow-md border border-gray-800/50 hover:shadow-lg hover:border-gray-700/70 transition-all">
                 <Link href={`/gallery/${item.id}`} className="block aspect-square relative overflow-hidden">
-                  <ImageWithPattern 
-                    src={item.imageUrl}
+                  <ImageWithPattern
+                    src={item.cleanPreviewUrl || item.imageUrl}
                     alt={item.title}
                     fill
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 33vw, 16vw"
                     className="object-cover transform group-hover:scale-105 transition-transform duration-500 h-full w-full"
                     imageType={item.imageType || "JPG"}
                   />
-                  
+
                   {/* AI badge */}
                   {item.aiGeneratedStatus === 'AI_GENERATED' && (
                     <div className="absolute top-2 left-2 bg-purple-600/80 text-white text-xs px-2 py-0.5 rounded-full">
                       AI Generated
                     </div>
                   )}
-                  
+
                   <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-80 transition-opacity flex flex-col justify-end">
                     <div className="p-4 w-full">
                       <div className="flex justify-between text-white mb-2">
@@ -288,19 +287,19 @@ export default async function CreatorProfilePage({
                     <p className="text-xs text-gray-400">
                       {new Date(item.createdAt).toLocaleDateString()}
                     </p>
-                    
+
                     {/* File type badge */}
                     <span className="text-xs text-gray-300 px-2 py-0.5 bg-gray-800 rounded">
                       {item.imageType || 'JPG'}
                     </span>
                   </div>
-                  
+
                   {/* Tags/keywords */}
                   {item.tags && item.tags.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {item.tags.slice(0, 2).map((tag, index) => (
-                        <Link 
-                          key={index} 
+                        <Link
+                          key={index}
                           href={`/creator/${id}?q=${tag}`}
                           className="text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 px-2 py-0.5 rounded-full"
                         >
@@ -324,8 +323,8 @@ export default async function CreatorProfilePage({
             {searchQuery ? (
               <>
                 <p className="text-gray-400 mb-4">Try adjusting your search terms</p>
-                <Link 
-                  href={`/creator/${id}`} 
+                <Link
+                  href={`/creator/${id}`}
                   className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-lg transition-colors inline-block"
                 >
                   View all resources

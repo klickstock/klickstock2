@@ -295,7 +295,7 @@ export default async function ImagesPage({
                         {/* ======================= THE CRITICAL CHANGE HERE ======================= */}
                         {/* ====================================================================== */}
                         <ImageWithPattern
-                          src={item.previewUrl}
+                          src={item.cleanPreviewUrl || item.previewUrl}
                           alt={item.title}
                           width={800}
                           height={800}
