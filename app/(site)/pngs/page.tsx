@@ -299,12 +299,9 @@ export default async function PngsPage({
                     key={item.id}
                     className="group block break-inside-avoid"
                   >
-                    <div className="bg-gray-900/30 rounded-xl overflow-hidden border border-gray-800/50 hover:border-indigo-500/40 transition-all duration-200 relative">
+                    <div className="bg-gray-900/60 rounded-xl overflow-hidden border border-gray-800/50 hover:border-indigo-500/40 transition-all duration-200 relative">
                       <div className="relative w-full">
                         <div className="absolute inset-0 bg-[url('/transparent-checkerboard.svg')] bg-repeat bg-[length:20px_20px] opacity-10"></div>
-                        {/* ====================================================================== */}
-                        {/* ======================= THE CRITICAL CHANGE HERE ======================= */}
-                        {/* ====================================================================== */}
                         <ImageWithPattern
                           src={item.cleanPreviewUrl || item.imageUrl}
                           alt={item.title}
@@ -314,20 +311,31 @@ export default async function PngsPage({
                           imageType={"PNG"}
                         />
                       </div>
-                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-                        <h3 className="text-white font-medium truncate">{item.title}</h3>
-                        <div className="flex items-center justify-between mt-1">
-                          <div className="text-xs text-white/80 truncate max-w-[60%]">
+                      {/* ====================================================================== */}
+                      {/* ======================= THE CRITICAL CHANGES START ======================= */}
+                      {/* ====================================================================== */}
+                      {isAiGenerated(item) && (
+                        <div className="absolute top-3 left-3 bg-purple-600/80 text-white text-xs py-0.5 px-2 rounded font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
+                          AI Generated
+                        </div>
+                      )}
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-gray-950 to-transparent p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
+                        <h3 className="text-white font-medium truncate">
+                          {item.title}
+                        </h3>
+                        <div className="flex justify-between items-center mt-1">
+                          <p className="text-sm text-gray-300">
                             By {item.user.name || item.user.email.split('@')[0]}
-                          </div>
-                          <div className="flex items-center text-xs text-white/80">
-                            <Eye className="w-3 h-3 mr-1" />
-                            <span>{item.views}</span>
-                            <Download className="w-3 h-3 ml-2 mr-1" />
-                            <span>{item.downloads}</span>
+                          </p>
+                          <div className="flex items-center gap-1 text-sm text-gray-400">
+                            <span>{item.views || 0}</span>
+                            <Eye className="w-4 h-4" />
                           </div>
                         </div>
                       </div>
+                      {/* ====================================================================== */}
+                      {/* ======================== THE CRITICAL CHANGES END ======================== */}
+                      {/* ====================================================================== */}
                     </div>
                   </Link>
                 ))}
