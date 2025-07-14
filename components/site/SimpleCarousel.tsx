@@ -22,23 +22,23 @@ interface SimpleCarouselProps {
 
 export default function SimpleCarousel({ items }: SimpleCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  
+
   // Make sure we have enough items
   const displayItems = items.length >= 5 ? items : [];
-  
+
   // Only show up to 5 items
   const limitedItems = displayItems.slice(0, Math.min(displayItems.length, 5));
-  
+
   const nextSlide = () => {
     if (limitedItems.length === 0) return;
     setCurrentIndex((prev) => (prev === limitedItems.length - 1 ? 0 : prev + 1));
   };
-  
+
   const prevSlide = () => {
     if (limitedItems.length === 0) return;
     setCurrentIndex((prev) => (prev === 0 ? limitedItems.length - 1 : prev - 1));
   };
-  
+
   if (limitedItems.length === 0) {
     return (
       <div className="relative overflow-hidden rounded-2xl bg-gray-900/60 border border-gray-800/50">
@@ -56,7 +56,7 @@ export default function SimpleCarousel({ items }: SimpleCarouselProps) {
       </div>
     );
   }
-  
+
   // Create a rotated list with the current index in the middle
   const visibleItems = [
     limitedItems[(currentIndex - 2 + limitedItems.length) % limitedItems.length],
@@ -65,11 +65,11 @@ export default function SimpleCarousel({ items }: SimpleCarouselProps) {
     limitedItems[(currentIndex + 1) % limitedItems.length],
     limitedItems[(currentIndex + 2) % limitedItems.length]
   ];
-  
+
   return (
     <div className="relative overflow-hidden rounded-2xl bg-gray-900/60 border border-gray-800/50">
       {/* Carousel Controls */}
-      <button 
+      <button
         onClick={prevSlide}
         className="absolute left-4 top-1/2 -translate-y-1/2 z-20 bg-gray-900/60 hover:bg-gray-900/80 text-white p-3 rounded-full shadow-lg hover:shadow-xl transition-all backdrop-blur-sm border border-gray-700/50"
         aria-label="Previous image"
@@ -78,8 +78,8 @@ export default function SimpleCarousel({ items }: SimpleCarouselProps) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      
-      <button 
+
+      <button
         onClick={nextSlide}
         className="absolute right-4 top-1/2 -translate-y-1/2 z-20 bg-gray-900/60 hover:bg-gray-900/80 text-white p-3 rounded-full shadow-lg hover:shadow-xl transition-all backdrop-blur-sm border border-gray-700/50"
         aria-label="Next image"
@@ -95,13 +95,13 @@ export default function SimpleCarousel({ items }: SimpleCarouselProps) {
           {visibleItems.map((image, index) => {
             const isActive = index === 2; // Center item
             return (
-              <Link 
+              <Link
                 href={`/gallery/${image.id}`}
-                key={`${image.id}-${index}`} 
+                key={`${image.id}-${index}`}
                 className={`relative overflow-hidden rounded-xl group 
                   transition-all duration-500 transform h-[300px] md:h-[350px]
-                  ${isActive 
-                    ? 'w-[280px] md:w-[400px] shadow-xl z-10 scale-105 border-2 border-indigo-500/50' 
+                  ${isActive
+                    ? 'w-[280px] md:w-[400px] shadow-xl z-10 scale-105 border-2 border-indigo-500/50'
                     : 'w-[200px] md:w-[280px] opacity-50 hover:opacity-80 border border-gray-700/30'
                   }`}
               >
@@ -129,7 +129,7 @@ export default function SimpleCarousel({ items }: SimpleCarouselProps) {
                       <p className="text-sm text-gray-300 line-clamp-1">
                         By {image.user.name || image.user.email.split('@')[0]}
                       </p>
-                      
+
                       {/* Add PNG badge for active slide */}
                       {image.imageType?.toUpperCase() === 'PNG' && (
                         <span className="bg-indigo-900/70 text-indigo-300 text-xs py-0.5 px-2 rounded-md backdrop-blur-sm flex items-center">
@@ -147,7 +147,7 @@ export default function SimpleCarousel({ items }: SimpleCarouselProps) {
           })}
         </div>
       </div>
-      
+
       {/* Pagination Indicators - Moved outside the carousel container */}
       <div className="mt-8">
         <div className="flex justify-center gap-2">
@@ -155,15 +155,14 @@ export default function SimpleCarousel({ items }: SimpleCarouselProps) {
             <button
               key={index}
               onClick={() => setCurrentIndex(index)}
-              className={`relative h-2 transition-all duration-300 ${
-                index === currentIndex
-                  ? 'w-12 bg-indigo-500' 
+              className={`relative h-2 transition-all duration-300 ${index === currentIndex
+                  ? 'w-12 bg-indigo-500'
                   : 'w-6 bg-gray-600 hover:bg-gray-500'
-              } rounded-full overflow-hidden`}
+                } rounded-full overflow-hidden`}
               aria-label={`Go to slide ${index + 1}`}
             >
               {index === currentIndex && (
-                <span 
+                <span
                   className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-500 animate-pulse"
                   style={{ animationDuration: '1.5s' }}
                 />

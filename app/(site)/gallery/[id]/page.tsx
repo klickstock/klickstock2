@@ -1,3 +1,5 @@
+// @/app/gallery/[id]/page.tsx
+
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -31,37 +33,26 @@ async function incrementViewCount(id: string) {
     }
   });
 }
+// Type for items that will have user property
 type ItemWithUser = Prisma.ContributorItemGetPayload<{
   include: { user: { select: { id: true; name: true; email: true } } }
 }>;
 
 // Safe display of imageType and aiGeneratedStatus, accounting for potentially older records
 const getImageType = (item: ItemWithUser) => {
-  // console.log('item.imageType :>> ', item.imageType);
+  console.log('item.imageType :>> ', item.imageType);
   return item.imageType || 'JPG';
 };
-// Type for items that will have user property
-// type ItemWithUser = Prisma.ContributorItemGetPayload<{
-//   include: { user: { select: { id: true; name: true; email: true } } }
-// }>;
-
-// const getImageType = (item: ItemWithUser) => {
-//   // console.log('item.imageType :>> ', item.imageType);
-//   return item.imageType || 'JPG';
-// };
 export default async function ImageDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  // Await params before destructuring
   const resolvedParams = await params;
   const { id } = resolvedParams;
 
-  // Increment view count
   await incrementViewCount(id);
 
-  // Fetch the image details
   const image = await db.contributorItem.findUnique({
     where: {
       id,
-      status: "APPROVED" // Only show approved images
+      status: "APPROVED"
     },
     include: {
       user: {
@@ -75,26 +66,23 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
     }
   });
 
-  // If image not found or not approved, return 404
   if (!image) {
     notFound();
   }
 
-  // Fetch related images by the same user
   const relatedImages = await db.contributorItem.findMany({
     where: {
       userId: image.userId,
       status: "APPROVED",
-      id: { not: image.id } // Exclude current image
+      id: { not: image.id }
     },
     orderBy: { createdAt: 'desc' },
     take: 6
   });
 
-  // Also fetch similar images by category or tags - increased limit
   const similarImages = await db.contributorItem.findMany({
     where: {
-      id: { not: image.id }, // Exclude current image
+      id: { not: image.id },
       status: "APPROVED",
       OR: [
         { category: image.category },
@@ -102,7 +90,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
       ]
     },
     orderBy: { downloads: 'desc' },
-    take: 8, // Increased from 6 to 8
+    take: 8,
     include: {
       user: {
         select: {
@@ -114,15 +102,12 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
     }
   });
 
-  // Format image type for display
   const imageType = image.imageType || 'JPG';
   const isAiGenerated = image.aiGeneratedStatus === 'AI_GENERATED';
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Content starts directly without separate navigation area */}
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
-        {/* Title, description, and back button in one container */}
         <div className="flex flex-col space-y-2 mb-6">
           <div className="flex items-center gap-3 mb-1">
             <Link
@@ -146,23 +131,33 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
           <div className="lg:col-span-2 space-y-8">
             {/* Main Image Display */}
             <div className="rounded-xl overflow-hidden bg-gray-900/60 border border-gray-800/50 shadow-lg">
-              {/* This container will now grow/shrink with the image inside it */}
-              <div className="relative w-full">
+              <div className="relative">
+                {/* Overlays */}
+                <div className="absolute top-4 right-4 z-10 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center">
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                  <span>{image.downloads || 0} downloads</span>
+                </div>
                 {isAiGenerated && (
-                  <div className="absolute top-4 left-4 z-20 bg-purple-600/80 text-white text-xs py-1 px-3 rounded-full">
+                  <div className="absolute top-4 left-4 z-10 bg-purple-600/80 text-white text-xs py-1 px-3 rounded-full">
                     AI Generated
                   </div>
                 )}
+
+                {/* ====================================================================== */}
+                {/* ======================= THE CRITICAL CHANGE HERE ======================= */}
+                {/* ====================================================================== */}
                 <ImageWithPattern
+                  className="aspect-[4/3] w-full" // Sizing classes are now on the component's root div
                   src={image.previewUrl || image.imageUrl}
                   alt={image.title}
+                  fill
                   priority
+                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 60vw, 50vw"
+                  imageClassName="object-contain" // Use `imageClassName` for styling the <Image> tag
                   imageType={imageType}
                   showResolution={true}
                   width={image.width}
                   height={image.height}
-                  // These classes make the image responsive while maintaining aspect ratio
-                  imageClassName="w-full h-auto"
                 />
               </div>
             </div>
@@ -184,15 +179,15 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     <Link
                       key={item.id}
                       href={`/gallery/${item.id}`}
-                      className="group block relative hover:opacity-95 transition-all duration-300 aspect-square"
+                      className="group block relative hover:opacity-95 transition-all duration-300"
                     >
                       <ImageWithPattern
-                        src={item.cleanPreviewUrl}
+                        src={item.cleanPreviewUrl || item.imageUrl}
                         alt={item.title}
-                        width={800}
-                        height={800}
-                        className="w-full transition-transform duration-500 group-hover:scale-110 rounded-2xl"
+                        width={400}
+                        height={300}
                         imageType={getImageType(item)}
+                        className="w-full h-auto rounded-lg transform group-hover:scale-105 transition-transform duration-500"
                       />
                     </Link>
                   ))}
@@ -201,13 +196,10 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
             )}
           </div>
 
-          {/* Sidebar - Combined sections into one unified div */}
+          {/* Sidebar */}
           <div>
-            {/* Single Unified Card with all image information */}
             <div className="rounded-xl overflow-hidden bg-gray-900/60 border border-gray-800/50 shadow-lg">
-              {/* User info section */}
               <div className="p-6 bg-gray-900/80">
-                {/* Author info with avatar */}
                 <Link href={`/creator/${image.userId}`} className="flex items-center space-x-3 mb-6 group">
                   <div className="h-12 w-12 rounded-full bg-gray-800 overflow-hidden relative flex-shrink-0">
                     {image.user.image ? (
@@ -231,17 +223,15 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                   </div>
                 </Link>
 
-                {/* Image Actions using the updated component */}
                 <ImageDetailActions
                   imageId={image.id}
-                  imageUrl={image.imageUrl}
+                  imageUrl={image.cleanPreviewUrl || image.imageUrl}
                   title={image.title}
                   currentDownloads={image.downloads || 0}
                   currentViews={image.views || 0}
                 />
               </div>
 
-              {/* Image details section */}
               <div className="border-t border-gray-800/50 px-6 py-5 bg-gray-900/60 space-y-4">
                 <div className="flex">
                   <div className="w-1/3 text-sm text-gray-400">License</div>
@@ -272,7 +262,6 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                   </div>
                 </div>
 
-                {/* Tags section - now integrated into the same card */}
                 {image.tags && image.tags.length > 0 && (
                   <>
                     <div className="border-t border-gray-800/30 pt-4 mt-4">
@@ -293,7 +282,6 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                   </>
                 )}
 
-                {/* Legal Info - now integrated */}
                 <div className="border-t border-gray-800/30 pt-4 mt-4 text-xs text-gray-400">
                   <p className="mb-2">
                     This resource can be used for personal and commercial projects with attribution.
@@ -317,21 +305,20 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                     View all <ChevronRight className="w-4 h-4 ml-1" />
                   </Link>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 auto-rows-auto">
                   {relatedImages.map((item) => (
                     <Link
                       key={item.id}
                       href={`/gallery/${item.id}`}
-                      className="group block relative hover:opacity-95 transition-all aspect-square"
+                      className="group block relative hover:opacity-95 transition-all"
                     >
                       <ImageWithPattern
                         src={item.cleanPreviewUrl || item.imageUrl}
                         alt={item.title}
-                        sizes="(max-width: 768px) 50vw, (max-width: 1024px) 25vw, 15vw"
-                        className="w-full h-full object-cover rounded-lg transform group-hover:scale-105 transition-transform duration-500"
-                        imageType={getImageType(item)}
                         width={300}
-                        height={300}
+                        height={225}
+                        imageType={getImageType(item)}
+                        className="w-full h-auto rounded-lg transform group-hover:scale-105 transition-transform duration-500"
                       />
                     </Link>
                   ))}
@@ -341,6 +328,6 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
           </div>
         </div>
       </div>
-    </div >
+    </div>
   );
 }

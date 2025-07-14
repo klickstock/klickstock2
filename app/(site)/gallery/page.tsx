@@ -168,7 +168,7 @@ export default async function GalleryPage({
 
   // Safe display of imageType and aiGeneratedStatus, accounting for potentially older records
   const getImageType = (item: ItemWithUser) => {
-    // console.log('item.imageType :>> ', item.imageType);
+    console.log('item.imageType :>> ', item.imageType);
     return item.imageType || 'JPG';
   };
 
@@ -319,7 +319,7 @@ export default async function GalleryPage({
                     <div className="bg-gray-900/60 rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-gray-800/50 hover:border-indigo-500/50 relative">
                       <div className="relative w-full">
                         <ImageWithPattern
-                          src={item.cleanPreviewUrl}
+                          src={item.cleanPreviewUrl || item.previewUrl}
                           alt={item.title}
                           width={800}
                           height={800}
@@ -327,8 +327,11 @@ export default async function GalleryPage({
                           imageType={getImageType(item)}
                         />
                       </div>
+                      {/* ====================================================================== */}
+                      {/* ======================= THE CRITICAL CHANGE HERE ======================= */}
+                      {/* ====================================================================== */}
                       {isAiGenerated(item) && (
-                        <div className="absolute top-3 left-3 bg-purple-600/80 text-white text-xs py-0.5 px-2 rounded font-medium">
+                        <div className="absolute top-3 left-3 bg-purple-600/80 text-white text-xs py-0.5 px-2 rounded font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                           AI Generated
                         </div>
                       )}
