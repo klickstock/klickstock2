@@ -130,7 +130,8 @@ export default async function HomePage() {
                           <ImageWithPattern
                             src={item.cleanPreviewUrl}
                             alt={item.title}
-                            fill
+                            height={800}
+                            width={800}
                             className="object-cover transform group-hover:scale-110 transition-transform duration-700 ease-out"
                             imageType={"PNG"} sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
                           />
