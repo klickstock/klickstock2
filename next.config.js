@@ -11,7 +11,7 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      bodySizeLimit: '260mb',
+      bodySizeLimit: '5000mb',
     },
   },
   eslint: {
