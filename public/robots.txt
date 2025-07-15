@@ -7,24 +7,26 @@ Allow: /contact
 Allow: /blog
 Allow: /terms
 Allow: /privacy
-Allow: /sitemap
+
+# Allow sitemap access
+Allow: /sitemap.xml
+Sitemap: https://klickstock.com/sitemap.xml
 
 # Disallow admin and auth pages
 Disallow: /admin/
 Disallow: /sadmin/
-Disallow: /api/
 Disallow: /contributor/dashboard
 Disallow: /profile/
+
+# Disallow internal API routes but allow the sitemap generator
+Disallow: /api/
 
 # Disallow search result pages to avoid duplicate content
 Disallow: /gallery?*
 Disallow: /search?*
 
-# Allow specific CSS and JS files
+# Allow specific static assets
 Allow: /_next/static/
 Allow: /favicon.ico
 Allow: /icon.svg
 Allow: /apple-touch-icon.png
-
-# Sitemap location
-Sitemap: https://klickstock.com/sitemap.xml 

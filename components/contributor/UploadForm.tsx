@@ -19,7 +19,7 @@ import {
 import { getBase64FromUrl } from "@/actions/getBase64FromUrl";
 
 import { RootState } from "@/redux/store";
-import toast from "react-hot-toast"; // <--- 1. Replaced 'sonner' with 'react-hot-toast'
+import toast from "react-hot-toast";
 import {
   setFiles,
   updateFile,
@@ -46,11 +46,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-
-// Maximum single file size (45MB)
-const MAX_SINGLE_FILE_SIZE = 45 * 1024 * 1024;
-// Maximum total size for a single batch upload (260MB)
-const MAX_TOTAL_FILE_SIZE = 260 * 1024 * 1024;
 
 const CATEGORY_OPTIONS = categoryOptions;
 
@@ -147,12 +142,6 @@ export function UploadForm() {
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
-    const totalSize = acceptedFiles.reduce((acc, file) => acc + file.size, 0);
-    if (totalSize > MAX_TOTAL_FILE_SIZE) {
-      toast.error(`Total file size exceeds the limit. Please upload less than ${MAX_TOTAL_FILE_SIZE / 1024 / 1024}MB at a time.`);
-      return;
-    }
-
     const filesToUpload = acceptedFiles.map(file => ({
       file,
       tempId: `${file.name}-${file.size}-${Date.now()}`
@@ -239,16 +228,11 @@ export function UploadForm() {
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
     accept: { 'image/*': ['.jpeg', '.jpg', '.png', '.gif'] },
-    maxSize: MAX_SINGLE_FILE_SIZE,
     disabled: isUploading || initialLoading,
     onDropRejected: (fileRejections) => {
       fileRejections.forEach(rejection => {
         rejection.errors.forEach(err => {
-          if (err.code === 'file-too-large') {
-            toast.error(`File is too large. Maximum size is ${MAX_SINGLE_FILE_SIZE / 1024 / 1024}MB.`);
-          } else {
-            toast.error(err.message);
-          }
+          toast.error(err.message);
         });
       });
     }
@@ -260,7 +244,6 @@ export function UploadForm() {
     if (!fileToRemove) return;
 
     const originalFileCount = files.length;
-    // --- 2. Updated toast logic for react-hot-toast ---
     const toastId = toast.loading(`Deleting ${fileToRemove.originalFileName}...`);
 
     localStorage.removeItem(`upload-progress-${fileToRemove.id}`);
@@ -314,9 +297,6 @@ export function UploadForm() {
     );
   };
 
-  // =================================================================
-  // ==  HERE IS YOUR FUNCTION, AS YOU PROVIDED IT.
-  // =================================================================
   const handleSaveProgress = () => {
     if (selectedFiles.length === 0) {
       toast.error("No files selected to save.");
@@ -342,7 +322,6 @@ export function UploadForm() {
     });
 
     if (savedCount > 0) {
-      // THIS IS THE TOAST YOU WANTED TO SHOW. IT WILL FIRE CORRECTLY.
       toast.success(`Progress for ${savedCount} image(s) saved locally.`);
     }
   };
@@ -437,7 +416,6 @@ export function UploadForm() {
     const apiKey = localStorage.getItem("geminiApiKey");
     if (!apiKey) {
       toast.error(
-        // react-hot-toast supports JSX just like sonner
         () => (
           <div className="flex flex-col gap-2">
             <span>Gemini API key is missing.</span>
@@ -497,7 +475,6 @@ export function UploadForm() {
       const generatedContent = JSON.parse(jsonMatch[0]);
       if (!CATEGORY_OPTIONS.some(cat => cat.value === generatedContent.category)) {
         generatedContent.category = '';
-        // --- 3. Replaced toast.warning with a standard toast call ---
         toast("AI suggested a category that doesn't exist. Please select one manually.", {
           icon: '⚠️'
         });
@@ -740,7 +717,6 @@ export function UploadForm() {
                     <h2 className="text-2xl font-medium text-white mb-2">Drag & drop your images here</h2>
                     <p className="text-gray-400 mb-8">Or click to browse files</p>
                     <button type="button" className="bg-indigo-600 hover:bg-indigo-700 text-white transition-colors px-8 py-3 rounded-lg font-medium text-lg">Select Files</button>
-                    <p className="text-gray-500 text-sm mt-8">Maximum file size: {MAX_SINGLE_FILE_SIZE / 1024 / 1024}MB</p>
                   </div>
                 </div>
               </div>
@@ -784,10 +760,6 @@ export function UploadForm() {
               <UploadSidebar
                 files={files}
                 activeFileIndex={activeFileIndex}
-                // NOTE: The active file's dimensions are now available inside UploadSidebar
-                // via `const activeFile = files[activeFileIndex];`
-                // You can then display `activeFile.width` and `activeFile.height`.
-                // Example: <p>{activeFile.width} x {activeFile.height} px</p>
                 setActiveFileIndex={setActiveFileIndex}
                 newTag={newTag}
                 setNewTag={setNewTag}

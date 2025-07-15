@@ -62,6 +62,14 @@ ${sitemaps
 
   } catch (error) {
     console.error('Fatal error generating sitemap index:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    // Return a 500 status but with a null body and the correct XML content type.
+    // This prevents Google from parsing an HTML error page and clarifies that the server
+    // failed to build the sitemap, which is a more accurate error report.
+    return new NextResponse(null, {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/xml',
+      }
+    });
   }
 }
